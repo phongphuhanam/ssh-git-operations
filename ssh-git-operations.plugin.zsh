@@ -15,11 +15,8 @@ export -f ssh-gh-remote-pull
 export -f ssh-gh-remote-fetch
 export -f scp-git-aware
 
-# Load completion file
-if [ -f "${0:h}/_ssh-git-operations" ]; then
-    fpath+=("${0:h}")
-    autoload -U compinit && compinit
-fi
+# Load completion file - automatically loaded by Oh My Zsh
+# The _ssh-git-operations file will be found in the plugin directory
 
 # Helper function to get GitHub token
 _ssh_git_get_token() {

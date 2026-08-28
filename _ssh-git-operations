@@ -1,44 +1,46 @@
-#compdef ssh-gh-remote-push ssh-gh-remote-pull ssh-gh-remote-fetch scp-git-aware
+#compdef ssh-gh-remote-push
+#compdef ssh-gh-remote-pull
+#compdef ssh-gh-remote-fetch
+#compdef scp-git-aware
 
 # Completion for ssh-git-operations plugin
 
-_ssh_git_operations() {
-    local -a commands
-
-    case "$service" in
-        ssh-gh-remote-push)
-            _description "Push current branch to GitHub over SSH"
-            _arguments \
-                '1:SSH host:_ssh_git_hosts' \
-                '2:Repository path (default: current):_files -/'
-            ;;
-        ssh-gh-remote-pull)
-            _description "Pull current branch from GitHub over SSH"
-            _arguments \
-                '1:SSH host:_ssh_git_hosts' \
-                '2:Repository path (default: current):_files -/'
-            ;;
-        ssh-gh-remote-fetch)
-            _description "Fetch from GitHub over SSH"
-            _arguments \
-                '1:SSH host:_ssh_git_hosts' \
-                '2:Repository path (default: current):_files -/'
-            ;;
-        scp-git-aware)
-            _description "Find git repositories on remote machine"
-            _arguments \
-                '1:SSH host:_ssh_git_hosts'
-            ;;
-    esac
-}
-
-# Complete SSH hosts from ~/.ssh/config
+# Helper to get SSH hosts from ~/.ssh/config
 _ssh_git_hosts() {
-    local hosts
-    if [ -f ~/.ssh/config ]; then
-        hosts=($(grep -E '^Host ' ~/.ssh/config | awk '{print $2}' | grep -v '^*'))
-        compadd -a hosts
+    if [[ -f ~/.ssh/config ]]; then
+        grep -E '^Host ' ~/.ssh/config | awk '{print $2}' | grep -v '^\*'
     fi
 }
 
-_ssh_git_operations "$@"
+# Main completion function for ssh-gh-remote-push
+_ssh_gh_remote_push() {
+    _arguments \
+        '1:SSH host:(($(_ssh_git_hosts)))' \
+        '2:Repository path:_files -/'
+}
+
+# Main completion function for ssh-gh-remote-pull
+_ssh_gh_remote_pull() {
+    _arguments \
+        '1:SSH host:(($(_ssh_git_hosts)))' \
+        '2:Repository path:_files -/'
+}
+
+# Main completion function for ssh-gh-remote-fetch
+_ssh_gh_remote_fetch() {
+    _arguments \
+        '1:SSH host:(($(_ssh_git_hosts)))' \
+        '2:Repository path:_files -/'
+}
+
+# Main completion function for scp-git-aware
+_scp_git_aware() {
+    _arguments \
+        '1:SSH host:(($(_ssh_git_hosts)))'
+}
+
+# Register completions
+compdef _ssh_gh_remote_push ssh-gh-remote-push
+compdef _ssh_gh_remote_pull ssh-gh-remote-pull
+compdef _ssh_gh_remote_fetch ssh-gh-remote-fetch
+compdef _scp_git_aware scp-git-aware
