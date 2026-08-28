@@ -1,6 +1,6 @@
 #compdef ssh-gh-remote-push ssh-gh-remote-pull ssh-gh-remote-fetch scp-git-aware
 
-# Completion for ssh-git-operations with remote path completion
+# Fast completion for ssh-git-operations
 _ssh-git-operations() {
     local hosts=($(grep "^Host " ~/.ssh/config 2>/dev/null | awk '{print $2}' | grep -v '^\*'))
 
@@ -10,8 +10,8 @@ _ssh-git-operations() {
                 # Complete SSH host
                 _arguments "1: :($hosts)"
             elif [ $CURRENT -eq 3 ]; then
-                # Complete remote path - this is where the magic happens
-                _ssh_git_remote_path_completion
+                # Complete remote path - optimized version
+                _ssh_git_remote_path_completion "$words[2]" "$words[3]"
             fi
             ;;
         scp-git-aware)
@@ -20,55 +20,57 @@ _ssh-git-operations() {
     esac
 }
 
-# Remote path completion function - shows directories on remote host
+# Optimized remote path completion - much faster
 _ssh_git_remote_path_completion() {
-    local ssh_host="${words[2]}"
-    local current_path="${words[3]}"
+    local ssh_host="$1"
+    local current_path="$2"
 
     if [ -z "$ssh_host" ]; then
         return
     fi
 
-    # If path is empty or just starting, show home directory
-    if [ -z "$current_path" ] || [ "$current_path" = "/" ]; then
-        current_path="~/"
+    # Timeout after 1 second to avoid hanging
+    local timeout=1
+
+    # Start with root or home if empty
+    if [ -z "$current_path" ]; then
+        current_path="~"
     fi
 
-    # Get the directory to list and the prefix
-    local dir_to_list
-    local prefix
-
+    # Extract directory to list and completion prefix
+    local dir_to_list prefix
     if [[ "$current_path" == */ ]]; then
-        # Path ends with /, list that directory
         dir_to_list="$current_path"
         prefix=""
     else
-        # Path doesn't end with /, extract directory and prefix
-        dir_to_list="$(dirname "$current_path")/"
-        prefix="$(basename "$current_path")"
+        dir_to_list="${current_path%/*}/"
+        prefix="${current_path##*/}"
     fi
 
-    # Get remote directories via SSH
-    local remote_dirs
-    remote_dirs=$(ssh -o ConnectTimeout=2 "$ssh_host" "ls -d \"${dir_to_list}\"* 2>/dev/null | grep -E '^[^.]*/?$'" 2>/dev/null)
+    # Quick SSH to list directories - optimized command
+    # Only list immediate children, no recursion
+    local cmd="ls -1d \"${dir_to_list}\"* 2>/dev/null | head -50"
+    local dirs
 
-    if [ -n "$remote_dirs" ]; then
-        # Filter by prefix if needed
-        if [ -n "$prefix" ]; then
-            remote_dirs=$(echo "$remote_dirs" | grep "^${dir_to_list}${prefix}")
-        fi
+    dirs=$(timeout $timeout ssh -o ConnectTimeout=1 -o BatchMode=yes "$ssh_host" "$cmd" 2>/dev/null)
 
-        # Convert to completion format
-        local -a dirs
-        while IFS= read -r dir; do
-            if [ -d "$dir" ] 2>/dev/null; then
-                dirs+=("${dir##*/}/")
-            fi
-        done < <(echo "$remote_dirs")
+    if [ -z "$dirs" ]; then
+        return
+    fi
 
-        if [ ${#dirs[@]} -gt 0 ]; then
-            _values 'remote path' "${dirs[@]}"
-        fi
+    # Format for completion - show only directories with trailing /
+    local -a completions
+    while read -r dir; do
+        [ -z "$dir" ] && continue
+        local basename="${dir##*/}"
+        completions+=("$basename/")
+    done < <(echo "$dirs")
+
+    # Remove duplicates and sort
+    completions=($(printf '%s\n' "${completions[@]}" | sort -u))
+
+    if [ ${#completions[@]} -gt 0 ]; then
+        _values 'path' "${completions[@]}"
     fi
 }
 
