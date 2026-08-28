@@ -113,23 +113,34 @@ This will scan for `.git` directories and display the paths to git repositories 
 
 ## How It Works
 
-1. **Local token extraction**: The plugin retrieves your GitHub token locally using `gh auth token`
-2. **SSH connection**: Establishes SSH connection to the remote machine
-3. **Remote branch detection**: Detects the current branch on the remote repository
-4. **Temporary credential helper**: Passes the token via git's credential helper mechanism without storing it
-5. **Token memory-only**: The token exists only in memory during the operation and is never saved to disk on the remote machine
+1. **Local token extraction**: The plugin retrieves your GitHub token locally using `gh auth token` — this always runs on your machine, never on the remote host.
+2. **Script delivered over stdin**: The whole remote-side script (cd, branch detection, the git command) is piped to `ssh <host> bash -s` over the SSH session's stdin, instead of being passed as a single `ssh host "<command>"` argument. This keeps the token out of the argv of the `ssh` process (visible locally via `ps`) and the `bash -s` process (visible remotely via `ps`).
+3. **Remote branch detection**: The script detects the current branch on the remote repository itself, in the same SSH round trip.
+4. **Reset-then-set credential helper**: The git command runs as `git -c credential.helper= -c credential.helper='!f() {...}; f' <push|pull|fetch> ...`. The leading `-c credential.helper=` clears any helper chain accumulated from config files *for this invocation only* (verified by testing directly against `git credential fill`/`approve`), so a pre-existing `credential.helper` on the remote (e.g. `store`, `osxkeychain`, a credential manager) is never consulted and never gets a chance to cache the token to disk.
+5. **Nothing written by this plugin**: We never write to `.git/config`, `~/.gitconfig`, or `.git-credentials` on the remote machine.
 
 ### Security Details
 
 ```bash
-# The credential helper is injected inline:
-git -c credential.helper='!f() { echo "username=x-access-token"; echo "password=$TOKEN"; }; f' push origin current-branch
+# Sent to `ssh <host> bash -s` over stdin (not as a command-line argument):
+set -e
+cd "<repo_path>" || { echo "..." >&2; exit 1; }
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "..." >&2; exit 1; }
+branch=$(git rev-parse --abbrev-ref HEAD)
+git -c credential.helper= -c credential.helper='!f() { echo "username=x-access-token"; echo "password=$TOKEN"; }; f' push origin "$branch"
 ```
 
-- Token is obtained from your local machine's GitHub CLI authentication
-- Token is passed as an environment variable in the SSH session
-- Git never stores credentials in `.git/config` or `.gitcredentials` on the remote machine
-- Each operation fetches a fresh token from your local gh CLI
+- Token is obtained from your local machine's GitHub CLI authentication and never leaves memory on your side except as part of the script text piped to `ssh`.
+- The script (token included) travels only inside the encrypted SSH channel, via stdin — not as a process argument.
+- The credential-helper chain is reset before ours is added, so a pre-existing remote helper cannot also persist the token.
+- Git never stores credentials in `.git/config`, `~/.gitconfig`, or `.gitcredentials` on the remote machine as a result of this plugin.
+- Each operation fetches a fresh token from your local `gh` CLI — nothing is cached or reused across invocations.
+
+### What this does *not* eliminate
+
+- Once `git` actually runs on the remote host, the token is still part of the `git -c credential.helper=...` argument for that process. For the few seconds the command executes, `ps auxww` on the remote host (run by root, or another user permitted to read process listings) could see it in the `git` process's own argv. Moving the script to stdin removes the token from the `ssh`/`bash -s` processes, but not from `git`'s own command-line arguments — avoiding that fully would require passing the token through a file descriptor or named pipe instead of a `-c` value.
+- On a hardened remote host with command-line auditing enabled (`auditd` execve logging, a `ForceCommand` wrapper, session recording), the token could still end up in those logs, since they capture process argv independently of git or our script.
+- We don't write to the remote's shell history (this is a non-interactive `ssh` exec, not an interactive login shell), but that's a property of how the remote is configured, not something this plugin can guarantee.
 
 ## Prerequisites for Remote Repositories
 

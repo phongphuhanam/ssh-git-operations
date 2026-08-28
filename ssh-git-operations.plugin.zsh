@@ -27,42 +27,55 @@ _ssh_git_get_token() {
     fi
 }
 
-# Helper function to execute git command over SSH with token authentication
-_ssh_git_exec() {
+# Run a git operation (push/pull/fetch) on the remote host.
+#
+# Security notes:
+# - The whole script is sent over the SSH session's stdin to a plain
+#   `bash -s` on the remote side, instead of being passed as a `ssh ... "<cmd>"`
+#   command-line argument. That keeps the token out of the argv of the `ssh`
+#   process (visible locally via `ps`) and the `bash -s` process (visible
+#   remotely via `ps`) for as long as the connection is open.
+# - `-c credential.helper= -c credential.helper='!f...'` resets the helper
+#   chain before adding ours, so a pre-existing `credential.helper` on the
+#   remote (e.g. `store` or a credential manager) is not also invoked to
+#   cache the token to disk after a successful push/pull.
+#
+# Residual exposure (not eliminated by the above): once `git` itself runs,
+# the token is still part of the `git -c credential.helper=...` argument, so
+# the `git` process's own argv briefly contains it in plaintext and would be
+# visible to `ps auxww` on the remote host (or root/same-user via
+# /proc/<pid>/environ-equivalent) for the few seconds the command executes.
+# Avoiding that entirely would require passing the token through a file
+# descriptor/FIFO rather than a git -c value; ask if you want that hardening.
+_ssh_git_remote_run() {
     local ssh_host=$1
-    local git_command=$2
-    local remote_branch=$3
+    local repo_path=$2
+    local operation=$3
+    local token=$4
 
-    if [ -z "$ssh_host" ] || [ -z "$git_command" ]; then
-        echo "Usage: _ssh_git_exec <user@host> <push|pull|fetch> [branch]" >&2
-        return 1
-    fi
-
-    # Get current branch if not specified
-    if [ -z "$remote_branch" ]; then
-        remote_branch=$(ssh "$ssh_host" 'cd "$1" && git rev-parse --abbrev-ref HEAD' _ 2>/dev/null)
-        if [ $? -ne 0 ]; then
-            echo "Error: Could not determine current branch on remote machine" >&2
+    case "$operation" in
+        push|pull)
+            ssh "$ssh_host" bash -s <<REMOTE_EOF
+set -e
+cd "${repo_path}" || { echo "Error: could not access ${repo_path} on ${ssh_host}" >&2; exit 1; }
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "Error: ${repo_path} is not a git repository" >&2; exit 1; }
+branch=\$(git rev-parse --abbrev-ref HEAD)
+git -c credential.helper= -c credential.helper='!f() { echo "username=x-access-token"; echo "password=${token}"; }; f' ${operation} origin "\$branch"
+REMOTE_EOF
+            ;;
+        fetch)
+            ssh "$ssh_host" bash -s <<REMOTE_EOF
+set -e
+cd "${repo_path}" || { echo "Error: could not access ${repo_path} on ${ssh_host}" >&2; exit 1; }
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "Error: ${repo_path} is not a git repository" >&2; exit 1; }
+git -c credential.helper= -c credential.helper='!f() { echo "username=x-access-token"; echo "password=${token}"; }; f' fetch origin
+REMOTE_EOF
+            ;;
+        *)
+            echo "Usage: _ssh_git_remote_run <user@host> <repo_path> <push|pull|fetch> <token>" >&2
             return 1
-        fi
-    fi
-
-    # Get token from local machine
-    local token
-    token=$(_ssh_git_get_token)
-    if [ $? -ne 0 ]; then
-        return 1
-    fi
-
-    # Build git command with credential helper
-    local git_cmd="git -c credential.helper='!f() { echo \"username=x-access-token\"; echo \"password=$token\"; }; f' $git_command"
-
-    if [ "$git_command" = "push" ] || [ "$git_command" = "pull" ]; then
-        git_cmd="$git_cmd origin $remote_branch"
-    fi
-
-    # Execute on remote machine
-    ssh "$ssh_host" "cd \"\$1\" && eval \"$git_cmd\"" _
+            ;;
+    esac
 }
 
 # ssh-gh-remote-push - Push current branch to GitHub over SSH
@@ -89,23 +102,11 @@ ssh-gh-remote-push() {
     # Default to current directory if no path provided
     repo_path=${repo_path:-.}
 
-    echo "Pushing to GitHub via SSH..."
-    ssh "$ssh_host" "cd \"$repo_path\" && git rev-parse --abbrev-ref HEAD" >/dev/null 2>&1
-    if [ $? -ne 0 ]; then
-        echo "Error: Could not access git repository at $repo_path on $ssh_host" >&2
-        return 1
-    fi
-
-    # Get current branch on remote
-    local branch=$(ssh "$ssh_host" "cd \"$repo_path\" && git rev-parse --abbrev-ref HEAD")
     local token
-    token=$(_ssh_git_get_token)
-    if [ $? -ne 0 ]; then
-        return 1
-    fi
+    token=$(_ssh_git_get_token) || return 1
 
-    # Execute push with token
-    ssh "$ssh_host" "cd \"$repo_path\" && git -c credential.helper='!f() { echo \"username=x-access-token\"; echo \"password=$token\"; }; f' push origin $branch"
+    echo "Pushing to GitHub via SSH..."
+    _ssh_git_remote_run "$ssh_host" "$repo_path" push "$token"
 }
 
 # ssh-gh-remote-pull - Pull from GitHub over SSH
@@ -132,23 +133,11 @@ ssh-gh-remote-pull() {
     # Default to current directory if no path provided
     repo_path=${repo_path:-.}
 
-    echo "Pulling from GitHub via SSH..."
-    ssh "$ssh_host" "cd \"$repo_path\" && git rev-parse --abbrev-ref HEAD" >/dev/null 2>&1
-    if [ $? -ne 0 ]; then
-        echo "Error: Could not access git repository at $repo_path on $ssh_host" >&2
-        return 1
-    fi
-
-    # Get current branch on remote
-    local branch=$(ssh "$ssh_host" "cd \"$repo_path\" && git rev-parse --abbrev-ref HEAD")
     local token
-    token=$(_ssh_git_get_token)
-    if [ $? -ne 0 ]; then
-        return 1
-    fi
+    token=$(_ssh_git_get_token) || return 1
 
-    # Execute pull with token
-    ssh "$ssh_host" "cd \"$repo_path\" && git -c credential.helper='!f() { echo \"username=x-access-token\"; echo \"password=$token\"; }; f' pull origin $branch"
+    echo "Pulling from GitHub via SSH..."
+    _ssh_git_remote_run "$ssh_host" "$repo_path" pull "$token"
 }
 
 # ssh-gh-remote-fetch - Fetch from GitHub over SSH
@@ -175,21 +164,11 @@ ssh-gh-remote-fetch() {
     # Default to current directory if no path provided
     repo_path=${repo_path:-.}
 
-    echo "Fetching from GitHub via SSH..."
-    ssh "$ssh_host" "cd \"$repo_path\" && git rev-parse --abbrev-ref HEAD" >/dev/null 2>&1
-    if [ $? -ne 0 ]; then
-        echo "Error: Could not access git repository at $repo_path on $ssh_host" >&2
-        return 1
-    fi
-
     local token
-    token=$(_ssh_git_get_token)
-    if [ $? -ne 0 ]; then
-        return 1
-    fi
+    token=$(_ssh_git_get_token) || return 1
 
-    # Execute fetch with token
-    ssh "$ssh_host" "cd \"$repo_path\" && git -c credential.helper='!f() { echo \"username=x-access-token\"; echo \"password=$token\"; }; f' fetch origin"
+    echo "Fetching from GitHub via SSH..."
+    _ssh_git_remote_run "$ssh_host" "$repo_path" fetch "$token"
 }
 
 # scp-git-aware - Enhanced scp with git-aware directory autocompletion
