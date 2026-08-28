@@ -1,77 +1,21 @@
 #compdef ssh-gh-remote-push ssh-gh-remote-pull ssh-gh-remote-fetch scp-git-aware
 
-# Fast completion for ssh-git-operations
+# Fast completion for ssh-git-operations (SSH hosts only - no slow remote queries)
 _ssh-git-operations() {
     local hosts=($(grep "^Host " ~/.ssh/config 2>/dev/null | awk '{print $2}' | grep -v '^\*'))
 
     case "$words[1]" in
         ssh-gh-remote-push|ssh-gh-remote-pull|ssh-gh-remote-fetch)
-            if [ $CURRENT -eq 2 ]; then
-                # Complete SSH host
-                _arguments "1: :($hosts)"
-            elif [ $CURRENT -eq 3 ]; then
-                # Complete remote path - optimized version
-                _ssh_git_remote_path_completion "$words[2]" "$words[3]"
-            fi
+            # Only complete SSH host (instant)
+            # For paths, user types directly (no completion delay)
+            _arguments \
+                "1:SSH host:($hosts)" \
+                "2:repository path:"
             ;;
         scp-git-aware)
-            _arguments "1: :($hosts)"
+            _arguments "1:SSH host:($hosts)"
             ;;
     esac
-}
-
-# Optimized remote path completion - much faster
-_ssh_git_remote_path_completion() {
-    local ssh_host="$1"
-    local current_path="$2"
-
-    if [ -z "$ssh_host" ]; then
-        return
-    fi
-
-    # Timeout after 1 second to avoid hanging
-    local timeout=1
-
-    # Start with root or home if empty
-    if [ -z "$current_path" ]; then
-        current_path="~"
-    fi
-
-    # Extract directory to list and completion prefix
-    local dir_to_list prefix
-    if [[ "$current_path" == */ ]]; then
-        dir_to_list="$current_path"
-        prefix=""
-    else
-        dir_to_list="${current_path%/*}/"
-        prefix="${current_path##*/}"
-    fi
-
-    # Quick SSH to list directories - optimized command
-    # Only list immediate children, no recursion
-    local cmd="ls -1d \"${dir_to_list}\"* 2>/dev/null | head -50"
-    local dirs
-
-    dirs=$(timeout $timeout ssh -o ConnectTimeout=1 -o BatchMode=yes "$ssh_host" "$cmd" 2>/dev/null)
-
-    if [ -z "$dirs" ]; then
-        return
-    fi
-
-    # Format for completion - show only directories with trailing /
-    local -a completions
-    while read -r dir; do
-        [ -z "$dir" ] && continue
-        local basename="${dir##*/}"
-        completions+=("$basename/")
-    done < <(echo "$dirs")
-
-    # Remove duplicates and sort
-    completions=($(printf '%s\n' "${completions[@]}" | sort -u))
-
-    if [ ${#completions[@]} -gt 0 ]; then
-        _values 'path' "${completions[@]}"
-    fi
 }
 
 _ssh-git-operations
