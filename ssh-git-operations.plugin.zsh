@@ -9,6 +9,18 @@ if ! command -v gh &> /dev/null; then
     return 1
 fi
 
+# Export functions for Oh My Zsh and completion
+export -f ssh-gh-remote-push
+export -f ssh-gh-remote-pull
+export -f ssh-gh-remote-fetch
+export -f scp-git-aware
+
+# Load completion file
+if [ -f "${0:h}/_ssh-git-operations" ]; then
+    fpath+=("${0:h}")
+    autoload -U compinit && compinit
+fi
+
 # Helper function to get GitHub token
 _ssh_git_get_token() {
     gh auth token 2>/dev/null

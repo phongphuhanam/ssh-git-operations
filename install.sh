@@ -60,6 +60,7 @@ fi
 echo "Installing plugin..."
 mkdir -p "$PLUGIN_DIR"
 cp ssh-git-operations.plugin.zsh "$PLUGIN_DIR/"
+cp _ssh-git-operations "$PLUGIN_DIR/"
 cp README.md "$PLUGIN_DIR/"
 cp LICENSE "$PLUGIN_DIR/"
 cp -r examples "$PLUGIN_DIR/" 2>/dev/null || true

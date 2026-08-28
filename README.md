@@ -9,6 +9,7 @@ A secure Oh My Zsh plugin for authenticated git push/pull/fetch operations over 
 - **Current branch detection**: Automatically detects and operates on the current branch
 - **Git-aware scp**: Helper command to discover git repositories on remote machines
 - **No token persistence**: Token exists only in memory during the git operation
+- **Tab completion**: Full autocompletion support for commands and SSH hosts from ~/.ssh/config
 
 ## Prerequisites
 
