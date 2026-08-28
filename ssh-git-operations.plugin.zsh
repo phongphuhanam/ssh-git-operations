@@ -27,38 +27,6 @@ _ssh_git_get_token() {
     fi
 }
 
-# Helper function to find and select git repo interactively
-_ssh_git_select_repo() {
-    local ssh_host=$1
-    local search_path=${2:-~/}
-
-    if ! command -v fzf &> /dev/null; then
-        echo "Error: fzf is not installed. Install it for interactive directory selection." >&2
-        echo "  macOS: brew install fzf" >&2
-        echo "  Linux: sudo apt-get install fzf" >&2
-        return 1
-    fi
-
-    echo "Scanning for git repositories on $ssh_host (this may take a moment)..."
-    local repos=$(ssh "$ssh_host" "find $search_path -maxdepth 3 -type d -name '.git' 2>/dev/null | sed 's|/.git||' | sort" 2>/dev/null)
-
-    if [ -z "$repos" ]; then
-        echo "Error: No git repositories found on $ssh_host under $search_path" >&2
-        return 1
-    fi
-
-    local selected=$(echo "$repos" | fzf --preview "ssh $ssh_host 'cd {} && git log --oneline -3 2>/dev/null'" \
-                                       --preview-window=right:40% \
-                                       --header "Select a git repository (preview shows last 3 commits)")
-
-    if [ -z "$selected" ]; then
-        echo "No repository selected" >&2
-        return 1
-    fi
-
-    echo "$selected"
-}
-
 # Helper function to execute git command over SSH with token authentication
 _ssh_git_exec() {
     local ssh_host=$1
@@ -99,24 +67,14 @@ _ssh_git_exec() {
 
 # ssh-gh-remote-push - Push current branch to GitHub over SSH
 # Usage: ssh-gh-remote-push user@host [path_to_repo]
-#        ssh-gh-remote-push user@host (interactive if path omitted)
 ssh-gh-remote-push() {
     local ssh_host=$1
-    local repo_path=$2
+    local repo_path=${2:-.}
 
     if [ -z "$ssh_host" ]; then
         echo "Usage: ssh-gh-remote-push <user@host> [repo_path]" >&2
         echo "Example: ssh-gh-remote-push dev@server.com /home/user/myproject" >&2
         return 1
-    fi
-
-    # If no path provided, use interactive selection
-    if [ -z "$repo_path" ]; then
-        echo "No repository path specified. Opening interactive selector..."
-        repo_path=$(_ssh_git_select_repo "$ssh_host" "~/")
-        if [ $? -ne 0 ]; then
-            return 1
-        fi
     fi
 
     echo "Pushing to GitHub via SSH..."
@@ -140,24 +98,14 @@ ssh-gh-remote-push() {
 
 # ssh-gh-remote-pull - Pull from GitHub over SSH
 # Usage: ssh-gh-remote-pull user@host [path_to_repo]
-#        ssh-gh-remote-pull user@host (interactive if path omitted)
 ssh-gh-remote-pull() {
     local ssh_host=$1
-    local repo_path=$2
+    local repo_path=${2:-.}
 
     if [ -z "$ssh_host" ]; then
         echo "Usage: ssh-gh-remote-pull <user@host> [repo_path]" >&2
         echo "Example: ssh-gh-remote-pull dev@server.com /home/user/myproject" >&2
         return 1
-    fi
-
-    # If no path provided, use interactive selection
-    if [ -z "$repo_path" ]; then
-        echo "No repository path specified. Opening interactive selector..."
-        repo_path=$(_ssh_git_select_repo "$ssh_host" "~/")
-        if [ $? -ne 0 ]; then
-            return 1
-        fi
     fi
 
     echo "Pulling from GitHub via SSH..."
@@ -181,24 +129,14 @@ ssh-gh-remote-pull() {
 
 # ssh-gh-remote-fetch - Fetch from GitHub over SSH
 # Usage: ssh-gh-remote-fetch user@host [path_to_repo]
-#        ssh-gh-remote-fetch user@host (interactive if path omitted)
 ssh-gh-remote-fetch() {
     local ssh_host=$1
-    local repo_path=$2
+    local repo_path=${2:-.}
 
     if [ -z "$ssh_host" ]; then
         echo "Usage: ssh-gh-remote-fetch <user@host> [repo_path]" >&2
         echo "Example: ssh-gh-remote-fetch dev@server.com /home/user/myproject" >&2
         return 1
-    fi
-
-    # If no path provided, use interactive selection
-    if [ -z "$repo_path" ]; then
-        echo "No repository path specified. Opening interactive selector..."
-        repo_path=$(_ssh_git_select_repo "$ssh_host" "~/")
-        if [ $? -ne 0 ]; then
-            return 1
-        fi
     fi
 
     echo "Fetching from GitHub via SSH..."

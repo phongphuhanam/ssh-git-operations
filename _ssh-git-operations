@@ -1,20 +1,75 @@
 #compdef ssh-gh-remote-push ssh-gh-remote-pull ssh-gh-remote-fetch scp-git-aware
 
-# Completion for ssh-git-operations
+# Completion for ssh-git-operations with remote path completion
 _ssh-git-operations() {
     local hosts=($(grep "^Host " ~/.ssh/config 2>/dev/null | awk '{print $2}' | grep -v '^\*'))
 
     case "$words[1]" in
         ssh-gh-remote-push|ssh-gh-remote-pull|ssh-gh-remote-fetch)
-            _arguments \
-                "1: :($hosts)" \
-                "2:repository path:_files -/"
+            if [ $CURRENT -eq 2 ]; then
+                # Complete SSH host
+                _arguments "1: :($hosts)"
+            elif [ $CURRENT -eq 3 ]; then
+                # Complete remote path - this is where the magic happens
+                _ssh_git_remote_path_completion
+            fi
             ;;
         scp-git-aware)
-            _arguments \
-                "1: :($hosts)"
+            _arguments "1: :($hosts)"
             ;;
     esac
+}
+
+# Remote path completion function - shows directories on remote host
+_ssh_git_remote_path_completion() {
+    local ssh_host="${words[2]}"
+    local current_path="${words[3]}"
+
+    if [ -z "$ssh_host" ]; then
+        return
+    fi
+
+    # If path is empty or just starting, show home directory
+    if [ -z "$current_path" ] || [ "$current_path" = "/" ]; then
+        current_path="~/"
+    fi
+
+    # Get the directory to list and the prefix
+    local dir_to_list
+    local prefix
+
+    if [[ "$current_path" == */ ]]; then
+        # Path ends with /, list that directory
+        dir_to_list="$current_path"
+        prefix=""
+    else
+        # Path doesn't end with /, extract directory and prefix
+        dir_to_list="$(dirname "$current_path")/"
+        prefix="$(basename "$current_path")"
+    fi
+
+    # Get remote directories via SSH
+    local remote_dirs
+    remote_dirs=$(ssh -o ConnectTimeout=2 "$ssh_host" "ls -d \"${dir_to_list}\"* 2>/dev/null | grep -E '^[^.]*/?$'" 2>/dev/null)
+
+    if [ -n "$remote_dirs" ]; then
+        # Filter by prefix if needed
+        if [ -n "$prefix" ]; then
+            remote_dirs=$(echo "$remote_dirs" | grep "^${dir_to_list}${prefix}")
+        fi
+
+        # Convert to completion format
+        local -a dirs
+        while IFS= read -r dir; do
+            if [ -d "$dir" ] 2>/dev/null; then
+                dirs+=("${dir##*/}/")
+            fi
+        done < <(echo "$remote_dirs")
+
+        if [ ${#dirs[@]} -gt 0 ]; then
+            _values 'remote path' "${dirs[@]}"
+        fi
+    fi
 }
 
 _ssh-git-operations
