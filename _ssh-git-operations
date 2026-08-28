@@ -1,18 +1,16 @@
 #compdef ssh-gh-remote-push ssh-gh-remote-pull ssh-gh-remote-fetch scp-git-aware
 
-# Fast completion for ssh-git-operations (SSH hosts only - no slow remote queries)
+# Completion for ssh-git-operations using scp-style syntax
 _ssh-git-operations() {
-    local hosts=($(grep "^Host " ~/.ssh/config 2>/dev/null | awk '{print $2}' | grep -v '^\*'))
-
     case "$words[1]" in
         ssh-gh-remote-push|ssh-gh-remote-pull|ssh-gh-remote-fetch)
-            # Only complete SSH host (instant)
-            # For paths, user types directly (no completion delay)
-            _arguments \
-                "1:SSH host:($hosts)" \
-                "2:repository path:"
+            # Use _ssh to handle remote path completion (like scp does)
+            # Syntax: command user@host:/path with colon
+            _ssh
             ;;
         scp-git-aware)
+            # Just complete SSH host
+            local hosts=($(grep "^Host " ~/.ssh/config 2>/dev/null | awk '{print $2}' | grep -v '^\*'))
             _arguments "1:SSH host:($hosts)"
             ;;
     esac

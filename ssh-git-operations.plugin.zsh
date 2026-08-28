@@ -66,16 +66,28 @@ _ssh_git_exec() {
 }
 
 # ssh-gh-remote-push - Push current branch to GitHub over SSH
-# Usage: ssh-gh-remote-push user@host [path_to_repo]
+# Usage: ssh-gh-remote-push user@host:/path  (scp-style with colon)
+#        ssh-gh-remote-push user@host /path   (space-separated)
 ssh-gh-remote-push() {
     local ssh_host=$1
-    local repo_path=${2:-.}
+    local repo_path=$2
 
     if [ -z "$ssh_host" ]; then
-        echo "Usage: ssh-gh-remote-push <user@host> [repo_path]" >&2
-        echo "Example: ssh-gh-remote-push dev@server.com /home/user/myproject" >&2
+        echo "Usage: ssh-gh-remote-push <user@host>:[/path] or <user@host> [/path]" >&2
+        echo "Examples:" >&2
+        echo "  ssh-gh-remote-push dev@server.com:/home/user/myproject" >&2
+        echo "  ssh-gh-remote-push dev@server.com /home/user/myproject" >&2
         return 1
     fi
+
+    # Handle scp-style syntax with colon (user@host:/path)
+    if [[ "$ssh_host" == *:* ]]; then
+        repo_path="${ssh_host#*:}"
+        ssh_host="${ssh_host%:*}"
+    fi
+
+    # Default to current directory if no path provided
+    repo_path=${repo_path:-.}
 
     echo "Pushing to GitHub via SSH..."
     ssh "$ssh_host" "cd \"$repo_path\" && git rev-parse --abbrev-ref HEAD" >/dev/null 2>&1
@@ -97,16 +109,28 @@ ssh-gh-remote-push() {
 }
 
 # ssh-gh-remote-pull - Pull from GitHub over SSH
-# Usage: ssh-gh-remote-pull user@host [path_to_repo]
+# Usage: ssh-gh-remote-pull user@host:/path  (scp-style with colon)
+#        ssh-gh-remote-pull user@host /path   (space-separated)
 ssh-gh-remote-pull() {
     local ssh_host=$1
-    local repo_path=${2:-.}
+    local repo_path=$2
 
     if [ -z "$ssh_host" ]; then
-        echo "Usage: ssh-gh-remote-pull <user@host> [repo_path]" >&2
-        echo "Example: ssh-gh-remote-pull dev@server.com /home/user/myproject" >&2
+        echo "Usage: ssh-gh-remote-pull <user@host>:[/path] or <user@host> [/path]" >&2
+        echo "Examples:" >&2
+        echo "  ssh-gh-remote-pull dev@server.com:/home/user/myproject" >&2
+        echo "  ssh-gh-remote-pull dev@server.com /home/user/myproject" >&2
         return 1
     fi
+
+    # Handle scp-style syntax with colon (user@host:/path)
+    if [[ "$ssh_host" == *:* ]]; then
+        repo_path="${ssh_host#*:}"
+        ssh_host="${ssh_host%:*}"
+    fi
+
+    # Default to current directory if no path provided
+    repo_path=${repo_path:-.}
 
     echo "Pulling from GitHub via SSH..."
     ssh "$ssh_host" "cd \"$repo_path\" && git rev-parse --abbrev-ref HEAD" >/dev/null 2>&1
@@ -128,16 +152,28 @@ ssh-gh-remote-pull() {
 }
 
 # ssh-gh-remote-fetch - Fetch from GitHub over SSH
-# Usage: ssh-gh-remote-fetch user@host [path_to_repo]
+# Usage: ssh-gh-remote-fetch user@host:/path  (scp-style with colon)
+#        ssh-gh-remote-fetch user@host /path   (space-separated)
 ssh-gh-remote-fetch() {
     local ssh_host=$1
-    local repo_path=${2:-.}
+    local repo_path=$2
 
     if [ -z "$ssh_host" ]; then
-        echo "Usage: ssh-gh-remote-fetch <user@host> [repo_path]" >&2
-        echo "Example: ssh-gh-remote-fetch dev@server.com /home/user/myproject" >&2
+        echo "Usage: ssh-gh-remote-fetch <user@host>:[/path] or <user@host> [/path]" >&2
+        echo "Examples:" >&2
+        echo "  ssh-gh-remote-fetch dev@server.com:/home/user/myproject" >&2
+        echo "  ssh-gh-remote-fetch dev@server.com /home/user/myproject" >&2
         return 1
     fi
+
+    # Handle scp-style syntax with colon (user@host:/path)
+    if [[ "$ssh_host" == *:* ]]; then
+        repo_path="${ssh_host#*:}"
+        ssh_host="${ssh_host%:*}"
+    fi
+
+    # Default to current directory if no path provided
+    repo_path=${repo_path:-.}
 
     echo "Fetching from GitHub via SSH..."
     ssh "$ssh_host" "cd \"$repo_path\" && git rev-parse --abbrev-ref HEAD" >/dev/null 2>&1
