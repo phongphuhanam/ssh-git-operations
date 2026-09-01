@@ -105,6 +105,8 @@ ssh-gh-remote-fetch dev@myserver.com /home/user/my-project
 
 Clone a GitHub repository **onto a remote machine** (useful to provision a server or get a fresh checkout) using the same token-via-credential-helper mechanism. The repository is given as an `owner/repo` reference or a full HTTPS URL; an optional destination directory on the remote is also accepted.
 
+**If the destination already holds a git clone it is updated in place** (`pull --ff-only` on the current branch), the same as re-running `git pull` — so the command is safe to repeat idempotently. An existing *empty* directory is used as the clone target. An existing *non-empty* directory that is not a repository is refused with an error.
+
 ```bash
 ssh-gh-remote-clone user@remote-server.com owner/repo [dest]
 ssh-gh-remote-clone user@remote-server.com:/path/to/dest owner/repo|url

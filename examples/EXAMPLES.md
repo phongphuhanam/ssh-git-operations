@@ -73,6 +73,8 @@ ssh-gh-remote-clone dev@server.com owner/my-project
 # 2. Runs `git clone https://github.com/owner/my-project.git my-project` over the SSH session
 # 3. Auth uses your local token, injected via a temporary credential helper
 # 4. Token never stored on server
+# 5. Re-running the same command updates the existing clone in place
+#    (git pull --ff-only) instead of failing with "already exists"
 
 # Explicit destination path:
 ssh-gh-remote-clone dev@server.com owner/my-project /opt/projects

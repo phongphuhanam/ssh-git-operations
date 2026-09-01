@@ -74,11 +74,27 @@ REMOTE_EOF
             ;;
         clone)
             # Extra parameter: destination directory (optional; defaults to the
-            # repository name in the remote current directory)
+            # repository name in the remote current directory).
+            # Destination that already holds a git clone is updated in place
+            # (pull --ff-only) instead of failing with "already exists".
+            # An existing empty directory is used as the clone target.
+            # An existing non-empty, non-repo directory is an error.
             local dest_dir=$5
             ssh "$ssh_host" bash -s <<REMOTE_EOF
 set -e
-git -c credential.helper= -c credential.helper='!f() { echo "username=x-access-token"; echo "password=${token}"; }; f' clone "${repo_path}" "${dest_dir}"
+url="${repo_path}"
+dest="${dest_dir}"
+if [ -d "\$dest" ] && git -C "\$dest" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "Repository already exists at \$dest — updating in place instead of re-cloning."
+    branch=\$(git -C "\$dest" rev-parse --abbrev-ref HEAD)
+    git -C "\$dest" -c credential.helper= -c credential.helper='!f() { echo "username=x-access-token"; echo "password=${token}"; }; f' pull --ff-only origin "\$branch"
+else
+    if [ -d "\$dest" ] && [ -n "\$(ls -A "\$dest" 2>/dev/null)" ]; then
+        echo "Error: \$dest exists on ${ssh_host} and is not a git repository; refusing to clone into it." >&2
+        exit 1
+    fi
+    git -c credential.helper= -c credential.helper='!f() { echo "username=x-access-token"; echo "password=${token}"; }; f' clone "\$url" "\$dest"
+fi
 REMOTE_EOF
             ;;
         *)
