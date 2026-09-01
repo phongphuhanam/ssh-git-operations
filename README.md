@@ -1,11 +1,11 @@
 # ssh-git-operations
 
-A secure Oh My Zsh plugin for authenticated git push/pull/fetch operations over SSH to remote machines using GitHub token authentication. **Tokens are never persisted on remote machines.**
+A secure Oh My Zsh plugin for authenticated git push/pull/fetch/clone operations over SSH to remote machines using GitHub token authentication. **Tokens are never persisted on remote machines.**
 
 ## Features
 
 - **Secure token handling**: GitHub token is obtained locally and passed via git credential helper without storing it remotely
-- **Three git operations**: `ssh-gh-remote-push`, `ssh-gh-remote-pull`, `ssh-gh-remote-fetch`
+- **Four git operations**: `ssh-gh-remote-push`, `ssh-gh-remote-pull`, `ssh-gh-remote-fetch`, `ssh-gh-remote-clone`
 - **Current branch detection**: Automatically detects and operates on the current branch
 - **Git-aware scp**: Helper command to discover git repositories on remote machines
 - **No token persistence**: Token exists only in memory during the git operation
@@ -99,6 +99,26 @@ ssh-gh-remote-fetch user@remote-server.com /path/to/repository
 **Example:**
 ```bash
 ssh-gh-remote-fetch dev@myserver.com /home/user/my-project
+```
+
+### Clone a Repository From GitHub
+
+Clone a GitHub repository **onto a remote machine** (useful to provision a server or get a fresh checkout) using the same token-via-credential-helper mechanism. The repository is given as an `owner/repo` reference or a full HTTPS URL; an optional destination directory on the remote is also accepted.
+
+```bash
+ssh-gh-remote-clone user@remote-server.com owner/repo [dest]
+```
+
+**Examples:**
+```bash
+# owner/repo reference, cloned into a folder named after the repo
+ssh-gh-remote-clone dev@myserver.com owner/my-project
+
+# scp-style colon syntax
+ssh-gh-remote-clone dev@myserver.com:owner/my-project
+
+# full URL with an explicit destination folder
+ssh-gh-remote-clone dev@myserver.com https://github.com/owner/my-project.git ~/projects
 ```
 
 ### Discover Git Repositories on Remote Machine

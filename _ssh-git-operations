@@ -1,4 +1,4 @@
-#compdef ssh-gh-remote-push ssh-gh-remote-pull ssh-gh-remote-fetch scp-git-aware
+#compdef ssh-gh-remote-push ssh-gh-remote-pull ssh-gh-remote-fetch ssh-gh-remote-clone scp-git-aware
 
 # Completion for ssh-git-operations: SSH host completion + scp-style remote paths.
 # Reuses zsh's own _ssh_hosts / _remote_files (the same helpers scp's completion
@@ -8,7 +8,7 @@ _ssh-git-operations() {
     local ret=1
 
     case "$words[1]" in
-        ssh-gh-remote-push|ssh-gh-remote-pull|ssh-gh-remote-fetch)
+        ssh-gh-remote-push|ssh-gh-remote-pull|ssh-gh-remote-fetch|ssh-gh-remote-clone)
             if [ $CURRENT -eq 2 ]; then
                 if compset -P 1 '[^./][^/]#:'; then
                     _remote_files -- ssh && ret=0

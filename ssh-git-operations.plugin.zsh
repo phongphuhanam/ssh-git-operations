@@ -13,6 +13,7 @@ fi
 export -f ssh-gh-remote-push
 export -f ssh-gh-remote-pull
 export -f ssh-gh-remote-fetch
+export -f ssh-gh-remote-clone
 export -f scp-git-aware
 
 # Load completion file - automatically loaded by Oh My Zsh
@@ -27,7 +28,7 @@ _ssh_git_get_token() {
     fi
 }
 
-# Run a git operation (push/pull/fetch) on the remote host.
+# Run a git operation (push/pull/fetch/clone) on the remote host.
 #
 # Security notes:
 # - The whole script is sent over the SSH session's stdin to a plain
@@ -71,8 +72,17 @@ git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "Error: ${repo_pat
 git -c credential.helper= -c credential.helper='!f() { echo "username=x-access-token"; echo "password=${token}"; }; f' fetch origin
 REMOTE_EOF
             ;;
+        clone)
+            # Extra parameter: destination directory (optional; defaults to the
+            # repository name in the remote current directory)
+            local dest_dir=$5
+            ssh "$ssh_host" bash -s <<REMOTE_EOF
+set -e
+git -c credential.helper= -c credential.helper='!f() { echo "username=x-access-token"; echo "password=${token}"; }; f' clone "${repo_path}" "${dest_dir}"
+REMOTE_EOF
+            ;;
         *)
-            echo "Usage: _ssh_git_remote_run <user@host> <repo_path> <push|pull|fetch> <token>" >&2
+            echo "Usage: _ssh_git_remote_run <user@host> <repo_path> <push|pull|fetch|clone> <token>" >&2
             return 1
             ;;
     esac
@@ -171,6 +181,54 @@ ssh-gh-remote-fetch() {
     _ssh_git_remote_run "$ssh_host" "$repo_path" fetch "$token"
 }
 
+# ssh-gh-remote-clone - Clone a repository from GitHub onto a remote machine over SSH
+# Usage: ssh-gh-remote-clone user@host:owner/repo [.]  (scp-style: repo after colon)
+#        ssh-gh-remote-clone user@host owner/repo [dest]
+#   The repository is specified as an owner/repo path or an HTTPS URL (GitHub
+#   repository name, not a path on the remote machine). An optional destination
+#   directory on the remote is also accepted.
+#        ssh-gh-remote-clone user@host https://github.com/owner/repo.git ~/.repos
+ssh-gh-remote-clone() {
+    local ssh_host=$1
+    local repo=$2
+    local dest_dir=$3
+
+    # Handle scp-style syntax with colon (user@host:owner/repo) BEFORE the
+    # guard, since the repository may be baked into a single argument.
+    if [ -z "$repo" ] && [[ "$ssh_host" == *@*:* ]]; then
+        repo="${ssh_host#*:}"
+        ssh_host="${ssh_host%:*}"
+    fi
+
+    if [ -z "$ssh_host" ] || [ -z "$repo" ]; then
+        echo "Usage: ssh-gh-remote-clone <user@host>:<owner/repo|url> [<dest>] or <user@host> <owner/repo|url> [<dest>]" >&2
+        echo "Examples:" >&2
+        echo "  ssh-gh-remote-clone dev@server.com:owner/myproject" >&2
+        echo "  ssh-gh-remote-clone dev@server.com owner/myproject" >&2
+        echo "  ssh-gh-remote-clone dev@server.com https://github.com/owner/myproject.git ~/" >&2
+        return 1
+    fi
+
+    # Normalize the repository reference to a cloneable HTTPS URL
+    if [[ "$repo" == http://* || "$repo" == https://* ]]; then
+        local clone_url=$repo
+        [[ "$clone_url" == *.git ]] || clone_url="${clone_url%/}.git"
+    else
+        clone_url="https://github.com/${repo%/}.git"
+    fi
+
+    # Default destination to the repository name in the current remote directory
+    local repo_name=${clone_url##*/}
+    repo_name=${repo_name%.git}
+    dest_dir=${dest_dir:-$repo_name}
+
+    local token
+    token=$(_ssh_git_get_token) || return 1
+
+    echo "Cloning ${clone_url} on ${ssh_host} to ${dest_dir} via SSH..."
+    _ssh_git_remote_run "$ssh_host" "$clone_url" clone "$token" "$dest_dir"
+}
+
 # scp-git-aware - Enhanced scp with git-aware directory autocompletion
 # Usage: scp-git-aware user@host
 scp-git-aware() {
@@ -207,4 +265,5 @@ if [ -n "$BASH_VERSION" ]; then
     complete -F _ssh_git_operations_completion ssh-gh-remote-push
     complete -F _ssh_git_operations_completion ssh-gh-remote-pull
     complete -F _ssh_git_operations_completion ssh-gh-remote-fetch
+    complete -F _ssh_git_operations_completion ssh-gh-remote-clone
 fi

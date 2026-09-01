@@ -60,6 +60,27 @@ ssh-gh-remote-fetch prod@server.com /var/www/app
 # 3. Allows you to inspect changes before merging
 ```
 
+### 5. Clone a Repository on a Remote
+
+Get a fresh copy of a GitHub repository onto a remote machine (provisioning, new checkout, recovery):
+
+```bash
+# From your local machine
+ssh-gh-remote-clone dev@server.com owner/my-project
+
+# What it does:
+# 1. Connects to the server
+# 2. Runs `git clone https://github.com/owner/my-project.git my-project` over the SSH session
+# 3. Auth uses your local token, injected via a temporary credential helper
+# 4. Token never stored on server
+
+# With an explicit destination folder:
+ssh-gh-remote-clone dev@server.com owner/my-project /opt/projects
+
+# scp-style colon syntax:
+ssh-gh-remote-clone dev@server.com:owner/my-project
+```
+
 ## CI/CD Integration Examples
 
 ### GitHub Actions Workflow
