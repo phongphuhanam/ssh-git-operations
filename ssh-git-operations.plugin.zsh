@@ -182,30 +182,42 @@ ssh-gh-remote-fetch() {
 }
 
 # ssh-gh-remote-clone - Clone a repository from GitHub onto a remote machine over SSH
-# Usage: ssh-gh-remote-clone user@host:owner/repo [.]  (scp-style: repo after colon)
-#        ssh-gh-remote-clone user@host owner/repo [dest]
-#   The repository is specified as an owner/repo path or an HTTPS URL (GitHub
-#   repository name, not a path on the remote machine). An optional destination
-#   directory on the remote is also accepted.
-#        ssh-gh-remote-clone user@host https://github.com/owner/repo.git ~/.repos
+# The repository is an owner/repo reference or an HTTPS URL (a GitHub repo, NOT
+# a path on the remote machine). The destination directory on the remote is
+# optional.
+#
+# Usage:
+#   ssh-gh-remote-clone user@host owner/repo [dest]
+#   ssh-gh-remote-clone user@host https://github.com/owner/repo.git [dest]
+#   ssh-gh-remote-clone user@host:/path/<dest> owner/repo|url   (scp-style dest)
+#   ssh-gh-remote-clone user@host:owner/repo                    (scp-style repo)
 ssh-gh-remote-clone() {
     local ssh_host=$1
     local repo=$2
     local dest_dir=$3
 
-    # Handle scp-style syntax with colon (user@host:owner/repo) BEFORE the
-    # guard, since the repository may be baked into a single argument.
-    if [ -z "$repo" ] && [[ "$ssh_host" == *@*:* ]]; then
-        repo="${ssh_host#*:}"
-        ssh_host="${ssh_host%:*}"
+    # Split scp-style "host:extra" syntax (a colon in arg 1 means host:tail).
+    # Skip URLs, which themselves contain a colon (https://...). The tail is a
+    # destination path when it looks like one (arg 2 then supplies the repo), or
+    # the repository itself when no repo argument is given.
+    if [[ $ssh_host == *:* && $ssh_host != http://* && $ssh_host != https://* ]]; then
+        local host_part=${ssh_host%%:*}
+        local tail=${ssh_host#*:}
+        ssh_host=$host_part
+        if [[ $tail == /* || $tail == "~"* || $tail == ./* ]]; then
+            [ -z "$dest_dir" ] && dest_dir=$tail
+        else
+            [ -z "$repo" ] && repo=$tail
+        fi
     fi
 
     if [ -z "$ssh_host" ] || [ -z "$repo" ]; then
-        echo "Usage: ssh-gh-remote-clone <user@host>:<owner/repo|url> [<dest>] or <user@host> <owner/repo|url> [<dest>]" >&2
+        echo "Usage: ssh-gh-remote-clone <user@host> <owner/repo|url> [dest]" >&2
+        echo "       ssh-gh-remote-clone <user@host>:/<dest-path> <owner/repo|url>" >&2
         echo "Examples:" >&2
-        echo "  ssh-gh-remote-clone dev@server.com:owner/myproject" >&2
         echo "  ssh-gh-remote-clone dev@server.com owner/myproject" >&2
-        echo "  ssh-gh-remote-clone dev@server.com https://github.com/owner/myproject.git ~/" >&2
+        echo "  ssh-gh-remote-clone host:/home/user/proj https://github.com/owner/myproject.git" >&2
+        echo "  ssh-gh-remote-clone dev@server.com https://github.com/owner/myproject.git" >&2
         return 1
     fi
 
@@ -214,6 +226,7 @@ ssh-gh-remote-clone() {
         local clone_url=$repo
         [[ "$clone_url" == *.git ]] || clone_url="${clone_url%/}.git"
     else
+        # owner/repo reference
         clone_url="https://github.com/${repo%/}.git"
     fi
 

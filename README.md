@@ -107,6 +107,7 @@ Clone a GitHub repository **onto a remote machine** (useful to provision a serve
 
 ```bash
 ssh-gh-remote-clone user@remote-server.com owner/repo [dest]
+ssh-gh-remote-clone user@remote-server.com:/path/to/dest owner/repo|url
 ```
 
 **Examples:**
@@ -114,8 +115,11 @@ ssh-gh-remote-clone user@remote-server.com owner/repo [dest]
 # owner/repo reference, cloned into a folder named after the repo
 ssh-gh-remote-clone dev@myserver.com owner/my-project
 
-# scp-style colon syntax
-ssh-gh-remote-clone dev@myserver.com:owner/my-project
+# destination path after the colon (scp-style), repo as the 2nd argument
+ssh-gh-remote-clone dev@myserver.com:/home/user/projects owner/my-project
+
+# ssh-config alias + repo URL, explicit destination folder
+ssh-gh-remote-clone myalias:/opt/www https://github.com/owner/my-project.git
 
 # full URL with an explicit destination folder
 ssh-gh-remote-clone dev@myserver.com https://github.com/owner/my-project.git ~/projects

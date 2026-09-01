@@ -74,11 +74,14 @@ ssh-gh-remote-clone dev@server.com owner/my-project
 # 3. Auth uses your local token, injected via a temporary credential helper
 # 4. Token never stored on server
 
-# With an explicit destination folder:
+# Explicit destination path:
 ssh-gh-remote-clone dev@server.com owner/my-project /opt/projects
 
-# scp-style colon syntax:
-ssh-gh-remote-clone dev@server.com:owner/my-project
+# scp-style: destination path after the colon, repo as 2nd argument
+ssh-gh-remote-clone dev@server.com:/home/user/projects owner/my-project
+
+# ssh-config alias + repo URL:
+ssh-gh-remote-clone myalias:/opt/www https://github.com/owner/my-project.git
 ```
 
 ## CI/CD Integration Examples
