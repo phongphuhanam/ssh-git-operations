@@ -93,6 +93,7 @@ else
         echo "Error: \$dest exists on ${ssh_host} and is not a git repository; refusing to clone into it." >&2
         exit 1
     fi
+    mkdir -p "\$(dirname "\$dest")"
     git -c credential.helper= -c credential.helper='!f() { echo "username=x-access-token"; echo "password=${token}"; }; f' clone "\$url" "\$dest"
 fi
 REMOTE_EOF
@@ -222,8 +223,12 @@ ssh-gh-remote-clone() {
         ssh_host=$host_part
         if [[ $tail == /* || $tail == "~"* || $tail == ./* ]]; then
             [ -z "$dest_dir" ] && dest_dir=$tail
+        elif [ -n "$repo" ]; then
+            # repo already supplied as arg 2, so a plain relative tail
+            # (e.g. "newproj") is a destination directory name, not a repo.
+            [ -z "$dest_dir" ] && dest_dir=$tail
         else
-            [ -z "$repo" ] && repo=$tail
+            repo=$tail
         fi
     fi
 
