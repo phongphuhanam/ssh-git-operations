@@ -21,6 +21,16 @@ _ssh_git_get_token() {
     fi
 }
 
+# Single-quote a string for safe literal embedding into a remote shell
+# script that is assembled locally by interpolating ${vars} into an
+# unquoted heredoc (see _ssh_git_remote_run's stdin-delivery notes below).
+# Needed wherever the interpolated value is arbitrary user input (commit
+# messages, pathspecs, git identity) rather than a token, which never
+# contains shell metacharacters in practice.
+_ssh_git_quote() {
+    printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
 # Run a git operation (push/pull/fetch/clone) on the remote host.
 #
 # Security notes:
@@ -304,6 +314,82 @@ ssh-gh-remote-submodule-update() {
     _ssh_git_remote_run "$ssh_host" "$repo_path" submodule-update "$token"
 }
 
+# ssh-gh-remote-commit - Stage and commit changes on a remote repo using
+# *your local machine's* git identity (user.name/user.email), instead of
+# whatever (if anything) is configured on the remote. The identity is
+# passed per-commit via `git -c`; nothing is written to the remote's git
+# config. No GitHub token is involved — this only commits locally on the
+# remote host. Follow up with ssh-gh-remote-push to publish it.
+#
+# Usage:
+#   ssh-gh-remote-commit <user@host>:[/path] -m "<message>" [pathspec...]
+#   ssh-gh-remote-commit <user@host> [/path] -m "<message>" [pathspec...]
+# With no pathspec, all changes in the repo are staged (like `git add -A`).
+ssh-gh-remote-commit() {
+    local ssh_host=$1
+    local repo_path=""
+
+    if [ -z "$ssh_host" ]; then
+        echo "Usage: ssh-gh-remote-commit <user@host>:[/path] -m \"<message>\" [pathspec...]" >&2
+        echo "       ssh-gh-remote-commit <user@host> [/path] -m \"<message>\" [pathspec...]" >&2
+        echo "Examples:" >&2
+        echo "  ssh-gh-remote-commit dev@server.com:/home/user/myproject -m \"fix bug\" src/foo.py" >&2
+        echo "  ssh-gh-remote-commit dev@server.com /home/user/myproject -m \"fix bug\"" >&2
+        return 1
+    fi
+
+    # Handle scp-style syntax with colon (user@host:/path); otherwise the
+    # next positional arg is the path, unless it's already the -m flag
+    # (meaning no path was given and it defaults to the remote's cwd).
+    if [[ "$ssh_host" == *:* ]]; then
+        repo_path="${ssh_host#*:}"
+        ssh_host="${ssh_host%:*}"
+        shift 1
+    elif [ "$2" != "-m" ]; then
+        repo_path=$2
+        shift 2
+    else
+        shift 1
+    fi
+
+    repo_path=${repo_path:-.}
+
+    if [ "$1" != "-m" ] || [ -z "$2" ]; then
+        echo "Error: a commit message is required, e.g. -m \"message\"" >&2
+        return 1
+    fi
+    local message=$2
+    shift 2
+
+    local local_name local_email
+    local_name=$(git config --get user.name 2>/dev/null)
+    local_email=$(git config --get user.email 2>/dev/null)
+    if [ -z "$local_name" ] || [ -z "$local_email" ]; then
+        echo "Error: local git identity not configured. Run:" >&2
+        echo "  git config --global user.name \"Your Name\"" >&2
+        echo "  git config --global user.email you@example.com" >&2
+        return 1
+    fi
+
+    local quoted_paths="."
+    if [ $# -gt 0 ]; then
+        quoted_paths=""
+        local p
+        for p in "$@"; do
+            quoted_paths="${quoted_paths} $(_ssh_git_quote "$p")"
+        done
+    fi
+
+    echo "Committing on ${ssh_host} as ${local_name} <${local_email}>..."
+    ssh "$ssh_host" bash -s <<REMOTE_EOF
+set -e
+cd "${repo_path}" || { echo "Error: could not access ${repo_path} on ${ssh_host}" >&2; exit 1; }
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "Error: ${repo_path} is not a git repository" >&2; exit 1; }
+git add -- ${quoted_paths}
+git -c user.name=$(_ssh_git_quote "$local_name") -c user.email=$(_ssh_git_quote "$local_email") commit -m $(_ssh_git_quote "$message")
+REMOTE_EOF
+}
+
 # scp-git-aware - Enhanced scp with git-aware directory autocompletion
 # Usage: scp-git-aware user@host
 scp-git-aware() {
@@ -372,4 +458,5 @@ if [ -n "$BASH_VERSION" ]; then
     complete -F _ssh_git_operations_completion ssh-gh-remote-fetch
     complete -F _ssh_git_operations_completion ssh-gh-remote-clone
     complete -F _ssh_git_operations_completion ssh-gh-remote-submodule-update
+    complete -F _ssh_git_operations_completion ssh-gh-remote-commit
 fi

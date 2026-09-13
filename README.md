@@ -5,7 +5,8 @@ A secure Oh My Zsh plugin for authenticated git push/pull/fetch/clone operations
 ## Features
 
 - **Secure token handling**: GitHub token is obtained locally and passed via git credential helper without storing it remotely
-- **Five git operations**: `ssh-gh-remote-push`, `ssh-gh-remote-pull`, `ssh-gh-remote-fetch`, `ssh-gh-remote-clone`, `ssh-gh-remote-submodule-update`
+- **Six git operations**: `ssh-gh-remote-push`, `ssh-gh-remote-pull`, `ssh-gh-remote-fetch`, `ssh-gh-remote-clone`, `ssh-gh-remote-submodule-update`, `ssh-gh-remote-commit`
+- **Commit as yourself**: `ssh-gh-remote-commit` commits on the remote using *your local* git identity, without touching the remote's git config
 - **Current branch detection**: Automatically detects and operates on the current branch
 - **Git-aware scp**: Helper command to discover git repositories on remote machines
 - **No token persistence**: Token exists only in memory during the git operation
@@ -150,6 +151,26 @@ ssh-gh-remote-submodule-update user@remote-server.com /path/to/repository
 **Example:**
 ```bash
 ssh-gh-remote-submodule-update dev@myserver.com /home/user/my-project
+```
+
+### Commit on a Remote Repository Using Your Local Identity
+
+Stage and commit changes on a remote repository using **your local machine's** `user.name`/`user.email` (from `git config`), instead of whatever identity — or lack of one — is configured on the remote. The identity is passed per-commit via `git -c`; it is never written to the remote's `.gitconfig`. No GitHub token is involved, since this only commits locally on the remote host — follow up with `ssh-gh-remote-push` to publish it.
+
+```bash
+ssh-gh-remote-commit user@remote-server.com:/path/to/repository -m "commit message" [pathspec...]
+ssh-gh-remote-commit user@remote-server.com /path/to/repository -m "commit message" [pathspec...]
+```
+
+With no `pathspec`, all changes in the repo are staged (like `git add -A`).
+
+**Examples:**
+```bash
+# Commit specific files
+ssh-gh-remote-commit dev@myserver.com:/home/user/my-project -m "Fix bug in parser" src/parser.py
+
+# Commit everything changed in the repo
+ssh-gh-remote-commit dev@myserver.com /home/user/my-project -m "WIP checkpoint"
 ```
 
 ### Discover Git Repositories on Remote Machine
