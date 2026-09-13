@@ -191,15 +191,17 @@ Flip `PasswordAuthentication` in `/etc/ssh/sshd_config` (yes↔no) and reload ss
 sshd-toggle-password
 ```
 
-For a quick one-off — e.g. right after logging into a box, without loading the whole plugin — use the standalone script as a single line:
+For a quick one-off — e.g. right after logging into a box, without loading the whole plugin — use the standalone script as a single line.
+
+On the machine you're currently on:
 
 ```bash
-# On the machine you're currently on
 curl -fsSL https://raw.githubusercontent.com/phongphuhanam/ssh-git-operations/main/sshd-toggle-password.sh | bash
+```
 
-# Or on a remote host in one line from your own machine (needs passwordless
-# sudo on the remote account — there's no tty for a sudo prompt over a
-# non-interactive ssh pipe)
+Or on a remote host in one line from your own machine (needs passwordless sudo on the remote account — there's no tty for a sudo prompt over a non-interactive ssh pipe):
+
+```bash
 curl -fsSL https://raw.githubusercontent.com/phongphuhanam/ssh-git-operations/main/sshd-toggle-password.sh | ssh user@remote-server.com bash
 ```
 
