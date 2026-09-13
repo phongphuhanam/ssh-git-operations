@@ -183,6 +183,28 @@ scp-git-aware user@remote-server.com
 
 This will scan for `.git` directories and display the paths to git repositories on the remote machine.
 
+## AI Agent Skill
+
+`agent/remote-gh-ops/SKILL.md` documents this plugin's commands as a "skill"
+for AI coding harnesses (Claude Code, and others that adopt the same
+`SKILL.md` convention) — it tells the agent to prefer these pre-built
+functions over hand-rolling the ssh + token dance when the user asks it to
+work with a repo on a remote machine.
+
+Install it into whichever supported harness config directories are found on
+your machine (only harnesses already installed are touched — nothing is
+created from scratch):
+
+```bash
+./skill-install.sh
+```
+
+or, without a local clone:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/phongphuhanam/ssh-git-operations/main/skill-install.sh | bash
+```
+
 ## How It Works
 
 1. **Local token extraction**: The plugin retrieves your GitHub token locally using `gh auth token` — this always runs on your machine, never on the remote host.
