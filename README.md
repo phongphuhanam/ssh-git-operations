@@ -183,6 +183,28 @@ scp-git-aware user@remote-server.com
 
 This will scan for `.git` directories and display the paths to git repositories on the remote machine.
 
+### Toggle SSH Password Authentication
+
+Flip `PasswordAuthentication` in `/etc/ssh/sshd_config` (yes↔no) and reload sshd. If the plugin is loaded in your shell:
+
+```bash
+sshd-toggle-password
+```
+
+For a quick one-off — e.g. right after logging into a box, without loading the whole plugin — use the standalone script as a single line:
+
+```bash
+# On the machine you're currently on
+curl -fsSL https://raw.githubusercontent.com/phongphuhanam/ssh-git-operations/main/sshd-toggle-password.sh | bash
+
+# Or on a remote host in one line from your own machine (needs passwordless
+# sudo on the remote account — there's no tty for a sudo prompt over a
+# non-interactive ssh pipe)
+curl -fsSL https://raw.githubusercontent.com/phongphuhanam/ssh-git-operations/main/sshd-toggle-password.sh | ssh user@remote-server.com bash
+```
+
+Both require `sudo` on the target machine.
+
 ## AI Agent Skill
 
 `agent/remote-gh-ops/SKILL.md` documents this plugin's commands as a "skill"

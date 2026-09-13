@@ -405,9 +405,11 @@ scp-git-aware() {
     ssh "$ssh_host" "find ~/ -maxdepth 3 -type d -name '.git' 2>/dev/null | sed 's|/.git||' | head -20"
 }
 
-# sshd-toogle-password - Quickly enable/disable SSH password authentication on this host
-# Usage: sshd-toogle-password
-sshd-toogle-password() {
+# sshd-toggle-password - Quickly enable/disable SSH password authentication on this host
+# Usage: sshd-toggle-password
+# For a single-line version that doesn't need the plugin loaded (e.g. to run
+# once on a box you've just SSHed into), see sshd-toggle-password.sh.
+sshd-toggle-password() {
     local sshd_config="/etc/ssh/sshd_config"
     local current
 

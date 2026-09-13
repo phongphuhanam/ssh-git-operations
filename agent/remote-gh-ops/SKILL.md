@@ -46,7 +46,7 @@ end. Full rationale in this repo's `README.md` ("How It Works").
 | `ssh-gh-remote-submodule-update <host>[:/path]` | `git submodule sync --recursive` + `update --init --recursive`, token-authenticated; also exports `GH_TOKEN` remotely for hooks that read it directly |
 | `ssh-gh-remote-commit <host>[:/path] -m "msg" [pathspec...]` | Stage + commit on the remote using **your local** `git config user.name`/`user.email`, not the remote's. No token involved — it's a local commit on that host. Follow with `ssh-gh-remote-push` to publish |
 | `scp-git-aware <host>` | List git repos found on the remote, for discovery |
-| `sshd-toogle-password` | **Local only** — flips `PasswordAuthentication` in `/etc/ssh/sshd_config` on the machine you're currently on and reloads sshd. Not for the remote target host; don't use this to touch a remote's sshd config |
+| `sshd-toggle-password` | Flips `PasswordAuthentication` in `/etc/ssh/sshd_config` and reloads sshd, on whatever machine it's run on. Needs the plugin loaded there — for a one-off toggle without that, use `sshd-toggle-password.sh` instead (see below) |
 
 `<host>` accepts either `user@host /path` (space-separated) or scp-style
 `user@host:/path`.
@@ -60,9 +60,20 @@ end. Full rationale in this repo's `README.md` ("How It Works").
   `ssh-gh-remote-commit`
 - "update submodules on X" → `ssh-gh-remote-submodule-update`
 - "what repos are on X" → `scp-git-aware`
-- Toggling password login is about the **local** host's sshd, not a remote
-  target — don't reach for `sshd-toogle-password` when the user says "on the
-  remote"; that function takes no host argument by design.
+- "toggle password auth on X" (X = a remote host, and the plugin isn't
+  loaded there) → pipe the standalone script through ssh in one line,
+  rather than trying to ssh in and call the `sshd-toggle-password` function
+  (which requires the plugin to already be sourced on that host):
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/phongphuhanam/ssh-git-operations/main/sshd-toggle-password.sh | ssh user@host bash
+  ```
+  This needs passwordless sudo on the remote account (no tty for a sudo
+  prompt over a non-interactive ssh pipe). If that's not set up, `ssh` in
+  interactively and run the one-liner locally on that host instead:
+  `curl -fsSL .../sshd-toggle-password.sh | bash`.
+- "toggle password auth" with no remote host mentioned → run
+  `sshd-toggle-password` (if the plugin's loaded here) or the `.sh` one-liner
+  directly on this machine.
 
 ## 3. Don't re-derive what's already solved
 
