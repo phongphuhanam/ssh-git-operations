@@ -30,12 +30,24 @@ ssh your-host "git --version"
 
 ## Installation
 
-### Option 1: Oh My Zsh Plugin Manager
+### Option 1: Quick Install (curl/wget)
+
+Downloads the repo and runs the installer in one step — no manual clone needed:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/phongphuhanam/ssh-git-operations/main/install.sh | bash
+```
+
+```bash
+wget -qO- https://raw.githubusercontent.com/phongphuhanam/ssh-git-operations/main/install.sh | bash
+```
+
+### Option 2: Oh My Zsh Plugin Manager
 
 Clone this repository into your Oh My Zsh custom plugins directory:
 
 ```bash
-git clone https://github.com/yourusername/ssh-git-operations \
+git clone https://github.com/phongphuhanam/ssh-git-operations \
   ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/ssh-git-operations
 ```
 
@@ -51,7 +63,7 @@ Reload your shell:
 source ~/.zshrc
 ```
 
-### Option 2: Manual Installation
+### Option 3: Manual Installation
 
 1. Download the plugin file to a location of your choice
 2. Source it in your `.zshrc`:

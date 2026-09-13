@@ -40,6 +40,24 @@ if ! gh auth status &> /dev/null; then
 fi
 echo -e "${GREEN}✓ GitHub CLI authenticated${NC}\n"
 
+# Locate plugin source files: use the checkout this script lives in if
+# present (manual clone), otherwise fetch one (curl/wget | bash install).
+REPO_URL="https://github.com/phongphuhanam/ssh-git-operations.git"
+SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)"
+TMP_DIR=""
+
+if [ ! -f "$SOURCE_DIR/ssh-git-operations.plugin.zsh" ]; then
+    echo "Downloading ssh-git-operations..."
+    if ! command -v git &> /dev/null; then
+        echo -e "${RED}✗ git is required to install without a local clone${NC}"
+        exit 1
+    fi
+    TMP_DIR=$(mktemp -d)
+    trap 'rm -rf "$TMP_DIR"' EXIT
+    git clone --quiet --depth 1 "$REPO_URL" "$TMP_DIR"
+    SOURCE_DIR="$TMP_DIR"
+fi
+
 # Installation
 PLUGIN_DIR="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/ssh-git-operations"
 
@@ -59,11 +77,11 @@ fi
 # Copy plugin files
 echo "Installing plugin..."
 mkdir -p "$PLUGIN_DIR"
-cp ssh-git-operations.plugin.zsh "$PLUGIN_DIR/"
-cp _ssh-git-operations "$PLUGIN_DIR/"
-cp README.md "$PLUGIN_DIR/"
-cp LICENSE "$PLUGIN_DIR/"
-cp -r examples "$PLUGIN_DIR/" 2>/dev/null || true
+cp "$SOURCE_DIR/ssh-git-operations.plugin.zsh" "$PLUGIN_DIR/"
+cp "$SOURCE_DIR/_ssh-git-operations" "$PLUGIN_DIR/"
+cp "$SOURCE_DIR/README.md" "$PLUGIN_DIR/"
+cp "$SOURCE_DIR/LICENSE" "$PLUGIN_DIR/"
+cp -r "$SOURCE_DIR/examples" "$PLUGIN_DIR/" 2>/dev/null || true
 
 echo -e "${GREEN}✓ Plugin installed to: $PLUGIN_DIR${NC}\n"
 
