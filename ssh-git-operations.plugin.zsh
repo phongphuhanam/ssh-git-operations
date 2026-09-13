@@ -9,13 +9,6 @@ if ! command -v gh &> /dev/null; then
     return 1
 fi
 
-# Export functions for Oh My Zsh and completion
-export -f ssh-gh-remote-push
-export -f ssh-gh-remote-pull
-export -f ssh-gh-remote-fetch
-export -f ssh-gh-remote-clone
-export -f scp-git-aware
-
 # Load completion file - automatically loaded by Oh My Zsh
 # The _ssh-git-operations file will be found in the plugin directory
 
@@ -276,6 +269,36 @@ scp-git-aware() {
 
     echo "Scanning for git repositories on $ssh_host..."
     ssh "$ssh_host" "find ~/ -maxdepth 3 -type d -name '.git' 2>/dev/null | sed 's|/.git||' | head -20"
+}
+
+# sshd-toogle-password - Quickly enable/disable SSH password authentication on this host
+# Usage: sshd-toogle-password
+sshd-toogle-password() {
+    local sshd_config="/etc/ssh/sshd_config"
+    local current
+
+    current=$(sudo sshd -T 2>/dev/null | awk '/^passwordauthentication /{print $2}')
+    if [ -z "$current" ]; then
+        echo "Error: could not determine current PasswordAuthentication setting" >&2
+        return 1
+    fi
+
+    local new_value="yes"
+    [ "$current" = "yes" ] && new_value="no"
+
+    if sudo grep -qiE '^[[:space:]]*PasswordAuthentication[[:space:]]+' "$sshd_config"; then
+        sudo sed -i -E "s/^[[:space:]]*PasswordAuthentication[[:space:]]+.*/PasswordAuthentication ${new_value}/I" "$sshd_config"
+    else
+        echo "PasswordAuthentication ${new_value}" | sudo tee -a "$sshd_config" >/dev/null
+    fi
+
+    if command -v systemctl &>/dev/null; then
+        sudo systemctl reload sshd 2>/dev/null || sudo systemctl reload ssh 2>/dev/null
+    else
+        sudo service sshd reload 2>/dev/null || sudo service ssh reload 2>/dev/null
+    fi
+
+    echo "SSH password authentication is now: ${new_value}"
 }
 
 # Completion function for ssh-gh commands
