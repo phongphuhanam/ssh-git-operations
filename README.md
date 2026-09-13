@@ -5,7 +5,7 @@ A secure Oh My Zsh plugin for authenticated git push/pull/fetch/clone operations
 ## Features
 
 - **Secure token handling**: GitHub token is obtained locally and passed via git credential helper without storing it remotely
-- **Four git operations**: `ssh-gh-remote-push`, `ssh-gh-remote-pull`, `ssh-gh-remote-fetch`, `ssh-gh-remote-clone`
+- **Five git operations**: `ssh-gh-remote-push`, `ssh-gh-remote-pull`, `ssh-gh-remote-fetch`, `ssh-gh-remote-clone`, `ssh-gh-remote-submodule-update`
 - **Current branch detection**: Automatically detects and operates on the current branch
 - **Git-aware scp**: Helper command to discover git repositories on remote machines
 - **No token persistence**: Token exists only in memory during the git operation
@@ -137,6 +137,19 @@ ssh-gh-remote-clone myalias:/opt/www https://github.com/owner/my-project.git
 
 # full URL with an explicit destination folder
 ssh-gh-remote-clone dev@myserver.com https://github.com/owner/my-project.git ~/projects
+```
+
+### Sync and Update Submodules on a Remote Repository
+
+Run `git submodule sync --recursive` followed by `git submodule update --init --recursive` on a remote repository, authenticating each submodule fetch with your local GitHub token. The token is also exported remotely as `GH_TOKEN`, for submodule hooks or scripts that read that environment variable directly instead of going through git's credential helper.
+
+```bash
+ssh-gh-remote-submodule-update user@remote-server.com /path/to/repository
+```
+
+**Example:**
+```bash
+ssh-gh-remote-submodule-update dev@myserver.com /home/user/my-project
 ```
 
 ### Discover Git Repositories on Remote Machine

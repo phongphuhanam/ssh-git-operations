@@ -65,6 +65,19 @@ git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "Error: ${repo_pat
 git -c credential.helper= -c credential.helper='!f() { echo "username=x-access-token"; echo "password=${token}"; }; f' fetch origin
 REMOTE_EOF
             ;;
+        submodule-update)
+            # GH_TOKEN is exported for submodule hooks/scripts that read it
+            # directly, alongside the credential helper git itself uses to
+            # authenticate each submodule fetch.
+            ssh "$ssh_host" bash -s <<REMOTE_EOF
+set -e
+cd "${repo_path}" || { echo "Error: could not access ${repo_path} on ${ssh_host}" >&2; exit 1; }
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "Error: ${repo_path} is not a git repository" >&2; exit 1; }
+export GH_TOKEN="${token}"
+git submodule sync --recursive
+git -c credential.helper= -c credential.helper='!f() { echo "username=x-access-token"; echo "password=${token}"; }; f' submodule update --init --recursive
+REMOTE_EOF
+            ;;
         clone)
             # Extra parameter: destination directory (optional; defaults to the
             # repository name in the remote current directory).
@@ -92,7 +105,7 @@ fi
 REMOTE_EOF
             ;;
         *)
-            echo "Usage: _ssh_git_remote_run <user@host> <repo_path> <push|pull|fetch|clone> <token>" >&2
+            echo "Usage: _ssh_git_remote_run <user@host> <repo_path> <push|pull|fetch|clone|submodule-update> <token>" >&2
             return 1
             ;;
     esac
@@ -256,6 +269,41 @@ ssh-gh-remote-clone() {
     _ssh_git_remote_run "$ssh_host" "$clone_url" clone "$token" "$dest_dir"
 }
 
+# ssh-gh-remote-submodule-update - Sync and update submodules on a remote repo
+# Runs `git submodule sync --recursive` followed by
+# `git submodule update --init --recursive`, authenticating each submodule
+# fetch with your local GitHub token (also exported remotely as GH_TOKEN, for
+# submodule hooks/scripts that expect that env var directly).
+# Usage: ssh-gh-remote-submodule-update user@host:/path  (scp-style with colon)
+#        ssh-gh-remote-submodule-update user@host /path   (space-separated)
+ssh-gh-remote-submodule-update() {
+    local ssh_host=$1
+    local repo_path=$2
+
+    if [ -z "$ssh_host" ]; then
+        echo "Usage: ssh-gh-remote-submodule-update <user@host>:[/path] or <user@host> [/path]" >&2
+        echo "Examples:" >&2
+        echo "  ssh-gh-remote-submodule-update dev@server.com:/home/user/myproject" >&2
+        echo "  ssh-gh-remote-submodule-update dev@server.com /home/user/myproject" >&2
+        return 1
+    fi
+
+    # Handle scp-style syntax with colon (user@host:/path)
+    if [[ "$ssh_host" == *:* ]]; then
+        repo_path="${ssh_host#*:}"
+        ssh_host="${ssh_host%:*}"
+    fi
+
+    # Default to current directory if no path provided
+    repo_path=${repo_path:-.}
+
+    local token
+    token=$(_ssh_git_get_token) || return 1
+
+    echo "Syncing and updating submodules via SSH..."
+    _ssh_git_remote_run "$ssh_host" "$repo_path" submodule-update "$token"
+}
+
 # scp-git-aware - Enhanced scp with git-aware directory autocompletion
 # Usage: scp-git-aware user@host
 scp-git-aware() {
@@ -323,4 +371,5 @@ if [ -n "$BASH_VERSION" ]; then
     complete -F _ssh_git_operations_completion ssh-gh-remote-pull
     complete -F _ssh_git_operations_completion ssh-gh-remote-fetch
     complete -F _ssh_git_operations_completion ssh-gh-remote-clone
+    complete -F _ssh_git_operations_completion ssh-gh-remote-submodule-update
 fi
