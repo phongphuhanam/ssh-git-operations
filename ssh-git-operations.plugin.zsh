@@ -62,6 +62,23 @@ _ssh_git_load_forward_identity() {
         return 1
     fi
 
+    # ssh-add/ssh -A are no-ops (or hard failures) without a running agent.
+    # `ssh-add -l` exits 2 specifically when it can't reach one (as opposed
+    # to 1, which means an agent is running but holds no keys yet) - start
+    # one and export SSH_AUTH_SOCK/SSH_AGENT_PID into this shell so it's
+    # there for both ssh-add below and the `ssh -A` forward itself. It's
+    # left running for the rest of this shell session rather than torn back
+    # down, so repeat --forward-agent calls don't re-spawn one each time.
+    ssh-add -l &>/dev/null
+    if [ $? -eq 2 ]; then
+        if ! command -v ssh-agent &>/dev/null; then
+            echo "Error: no ssh-agent running and ssh-agent not found to start one" >&2
+            return 1
+        fi
+        echo "No ssh-agent running; starting one for this session..."
+        eval "$(ssh-agent -s)" >/dev/null
+    fi
+
     local fingerprint
     fingerprint=$(ssh-keygen -lf "$identity_file" 2>/dev/null | awk '{print $2}')
     if [ -n "$fingerprint" ] && ssh-add -l 2>/dev/null | grep -q "$fingerprint"; then

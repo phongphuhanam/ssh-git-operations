@@ -182,7 +182,7 @@ Everything above authenticates over HTTPS using your GitHub token, which only wo
 ssh-gh-remote-fetch dev@myserver.com /home/user/my-project --forward-agent github-work
 ```
 
-This resolves that `Host` entry's `IdentityFile`, loads it into your local ssh-agent if it isn't already there, and forwards the agent (`ssh -A`) for that one connection only — it's off by default and never left on in your shell.
+This resolves that `Host` entry's `IdentityFile`, starts a local ssh-agent first if none is already running, loads the identity into it if it isn't already there, and forwards the agent (`ssh -A`) for that one connection only — it's off by default and never left on in your shell (though an agent started this way keeps running for the rest of your session, same as running `ssh-agent` yourself).
 
 **This is a different kind of exposure than the token handling above**: a forwarded agent is a live socket on the remote host for as long as the connection is open, and anyone with root (or the same account) there could use it to sign requests as you during that window — unlike the token, which never leaves the encrypted stdin stream. Only use `--forward-agent` against hosts you trust, and only when the repo actually needs it.
 
