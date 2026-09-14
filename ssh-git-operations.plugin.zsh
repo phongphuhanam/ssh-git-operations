@@ -31,6 +31,39 @@ _ssh_git_quote() {
     printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
 }
 
+# Finds the single ~/.ssh/config Host entry whose HostName resolves to
+# github.com, for auto-picking an identity when --forward-agent is given
+# with no explicit alias. Errors (rather than guessing) unless there's
+# exactly one match.
+_ssh_git_auto_forward_host() {
+    if [[ ! -f "$HOME/.ssh/config" ]]; then
+        echo "Error: --forward-agent given with no host, and no ~/.ssh/config to auto-pick a github.com entry from. Use --forward-agent=<host> instead." >&2
+        return 1
+    fi
+
+    local -a candidates
+    candidates=(${(f)"$(awk '
+        tolower($1) == "host" {
+            if (host != "" && tolower(hostname) == "github.com" && host !~ /[*?]/) print host
+            host = $2; hostname = ""; next
+        }
+        tolower($1) == "hostname" { hostname = $2 }
+        END {
+            if (host != "" && tolower(hostname) == "github.com" && host !~ /[*?]/) print host
+        }
+    ' "$HOME/.ssh/config" 2>/dev/null)"})
+
+    if [ ${#candidates} -eq 0 ]; then
+        echo "Error: no Host entry in ~/.ssh/config has HostName github.com; can't auto-pick one. Use --forward-agent=<host> instead." >&2
+        return 1
+    elif [ ${#candidates} -gt 1 ]; then
+        echo "Error: multiple ~/.ssh/config Host entries resolve to github.com (${candidates[*]}); can't auto-pick. Use --forward-agent=<host> instead." >&2
+        return 1
+    fi
+
+    echo "${candidates[1]}"
+}
+
 # Resolves the IdentityFile configured for a named `Host` entry in the
 # caller's ~/.ssh/config, and loads it into the local ssh-agent (via
 # ssh-add) if it isn't already there. Used before agent-forwarded
@@ -41,6 +74,11 @@ _ssh_git_quote() {
 # requested one is included.
 _ssh_git_load_forward_identity() {
     local host_alias=$1
+
+    if [ "$host_alias" = "auto" ]; then
+        host_alias=$(_ssh_git_auto_forward_host) || return 1
+        echo "Auto-picked ssh-config Host '${host_alias}' (HostName github.com) for forwarding."
+    fi
 
     if ! awk -v alias="$host_alias" '
         tolower($1) == "host" { for (i = 2; i <= NF; i++) if ($i == alias) found = 1 }
@@ -89,28 +127,31 @@ _ssh_git_load_forward_identity() {
     ssh-add "$identity_file"
 }
 
-# Strips a --forward-agent <host-alias> / --forward-agent=<host-alias> flag
-# out of "$@" if present, wherever it appears in the argument list. Sets
-# _SSH_GIT_FORWARD_AGENT to the alias (empty if the flag wasn't given) and
+# Strips a --forward-agent[=<host-alias>] flag out of "$@" if present,
+# wherever it appears in the argument list. Sets _SSH_GIT_FORWARD_AGENT to:
+# empty (flag not given), "auto" (bare --forward-agent, or --forward-agent=
+# with nothing after the =, meaning auto-pick a github.com Host - see
+# _ssh_git_auto_forward_host), or the given alias otherwise. Sets
 # _SSH_GIT_ARGS to the remaining positional args. Used by each
 # ssh-gh-remote-* wrapper before its normal positional-argument parsing.
+#
+# Deliberately no "--forward-agent <alias>" two-token form: since the
+# surrounding positional args (host, path, ...) are themselves optional in
+# most of these commands, a bare word right after the flag would be
+# ambiguous between "the alias" and "the next positional arg" - only the
+# unambiguous --forward-agent=<alias> form takes a value.
 _ssh_git_strip_forward_agent_flag() {
     _SSH_GIT_FORWARD_AGENT=""
     _SSH_GIT_ARGS=()
-    local take_next="false"
     local arg
     for arg in "$@"; do
-        if [ "$take_next" = "true" ]; then
-            _SSH_GIT_FORWARD_AGENT="$arg"
-            take_next="false"
-            continue
-        fi
         case "$arg" in
             --forward-agent=*)
                 _SSH_GIT_FORWARD_AGENT="${arg#*=}"
+                [ -z "$_SSH_GIT_FORWARD_AGENT" ] && _SSH_GIT_FORWARD_AGENT="auto"
                 ;;
             --forward-agent)
-                take_next="true"
+                _SSH_GIT_FORWARD_AGENT="auto"
                 ;;
             *)
                 _SSH_GIT_ARGS+=("$arg")
@@ -248,9 +289,11 @@ REMOTE_EOF
 # ssh-gh-remote-push - Push current branch to GitHub over SSH
 # Usage: ssh-gh-remote-push user@host:/path  (scp-style with colon)
 #        ssh-gh-remote-push user@host /path   (space-separated)
-# Add --forward-agent <ssh-config-host> to also forward your ssh-agent (with
+# Add --forward-agent[=<ssh-config-host>] to also forward your ssh-agent (with
 # that Host entry's identity loaded), for when the *remote* repo's own
-# origin is itself an SSH URL rather than HTTPS.
+# origin is itself an SSH URL rather than HTTPS. Omit the value to
+# auto-pick the one ~/.ssh/config Host whose HostName is github.com (errors
+# if there's zero or more than one).
 ssh-gh-remote-push() {
     _ssh_git_strip_forward_agent_flag "$@"
     set -- "${_SSH_GIT_ARGS[@]}"
@@ -260,11 +303,12 @@ ssh-gh-remote-push() {
     local repo_path=$2
 
     if [ -z "$ssh_host" ]; then
-        echo "Usage: ssh-gh-remote-push <user@host>:[/path] or <user@host> [/path] [--forward-agent <ssh-config-host>]" >&2
+        echo "Usage: ssh-gh-remote-push <user@host>:[/path] or <user@host> [/path] [--forward-agent[=<ssh-config-host>]]" >&2
         echo "Examples:" >&2
         echo "  ssh-gh-remote-push dev@server.com:/home/user/myproject" >&2
         echo "  ssh-gh-remote-push dev@server.com /home/user/myproject" >&2
-        echo "  ssh-gh-remote-push dev@server.com /home/user/myproject --forward-agent github-work" >&2
+        echo "  ssh-gh-remote-push dev@server.com /home/user/myproject --forward-agent=github-work" >&2
+        echo "  ssh-gh-remote-push dev@server.com /home/user/myproject --forward-agent  # auto-picks a github.com Host" >&2
         return 1
     fi
 
@@ -287,9 +331,11 @@ ssh-gh-remote-push() {
 # ssh-gh-remote-pull - Pull from GitHub over SSH
 # Usage: ssh-gh-remote-pull user@host:/path  (scp-style with colon)
 #        ssh-gh-remote-pull user@host /path   (space-separated)
-# Add --forward-agent <ssh-config-host> to also forward your ssh-agent (with
+# Add --forward-agent[=<ssh-config-host>] to also forward your ssh-agent (with
 # that Host entry's identity loaded), for when the *remote* repo's own
-# origin is itself an SSH URL rather than HTTPS.
+# origin is itself an SSH URL rather than HTTPS. Omit the value to
+# auto-pick the one ~/.ssh/config Host whose HostName is github.com (errors
+# if there's zero or more than one).
 ssh-gh-remote-pull() {
     _ssh_git_strip_forward_agent_flag "$@"
     set -- "${_SSH_GIT_ARGS[@]}"
@@ -299,11 +345,12 @@ ssh-gh-remote-pull() {
     local repo_path=$2
 
     if [ -z "$ssh_host" ]; then
-        echo "Usage: ssh-gh-remote-pull <user@host>:[/path] or <user@host> [/path] [--forward-agent <ssh-config-host>]" >&2
+        echo "Usage: ssh-gh-remote-pull <user@host>:[/path] or <user@host> [/path] [--forward-agent[=<ssh-config-host>]]" >&2
         echo "Examples:" >&2
         echo "  ssh-gh-remote-pull dev@server.com:/home/user/myproject" >&2
         echo "  ssh-gh-remote-pull dev@server.com /home/user/myproject" >&2
-        echo "  ssh-gh-remote-pull dev@server.com /home/user/myproject --forward-agent github-work" >&2
+        echo "  ssh-gh-remote-pull dev@server.com /home/user/myproject --forward-agent=github-work" >&2
+        echo "  ssh-gh-remote-pull dev@server.com /home/user/myproject --forward-agent  # auto-picks a github.com Host" >&2
         return 1
     fi
 
@@ -326,9 +373,11 @@ ssh-gh-remote-pull() {
 # ssh-gh-remote-fetch - Fetch from GitHub over SSH
 # Usage: ssh-gh-remote-fetch user@host:/path  (scp-style with colon)
 #        ssh-gh-remote-fetch user@host /path   (space-separated)
-# Add --forward-agent <ssh-config-host> to also forward your ssh-agent (with
+# Add --forward-agent[=<ssh-config-host>] to also forward your ssh-agent (with
 # that Host entry's identity loaded), for when the *remote* repo's own
-# origin is itself an SSH URL rather than HTTPS.
+# origin is itself an SSH URL rather than HTTPS. Omit the value to
+# auto-pick the one ~/.ssh/config Host whose HostName is github.com (errors
+# if there's zero or more than one).
 ssh-gh-remote-fetch() {
     _ssh_git_strip_forward_agent_flag "$@"
     set -- "${_SSH_GIT_ARGS[@]}"
@@ -338,11 +387,12 @@ ssh-gh-remote-fetch() {
     local repo_path=$2
 
     if [ -z "$ssh_host" ]; then
-        echo "Usage: ssh-gh-remote-fetch <user@host>:[/path] or <user@host> [/path] [--forward-agent <ssh-config-host>]" >&2
+        echo "Usage: ssh-gh-remote-fetch <user@host>:[/path] or <user@host> [/path] [--forward-agent[=<ssh-config-host>]]" >&2
         echo "Examples:" >&2
         echo "  ssh-gh-remote-fetch dev@server.com:/home/user/myproject" >&2
         echo "  ssh-gh-remote-fetch dev@server.com /home/user/myproject" >&2
-        echo "  ssh-gh-remote-fetch dev@server.com /home/user/myproject --forward-agent github-work" >&2
+        echo "  ssh-gh-remote-fetch dev@server.com /home/user/myproject --forward-agent=github-work" >&2
+        echo "  ssh-gh-remote-fetch dev@server.com /home/user/myproject --forward-agent  # auto-picks a github.com Host" >&2
         return 1
     fi
 
@@ -372,9 +422,11 @@ ssh-gh-remote-fetch() {
 #   ssh-gh-remote-clone user@host https://github.com/owner/repo.git [dest]
 #   ssh-gh-remote-clone user@host:/path/<dest> owner/repo|url   (scp-style dest)
 #   ssh-gh-remote-clone user@host:owner/repo                    (scp-style repo)
-# Add --forward-agent <ssh-config-host> to also forward your ssh-agent (with
+# Add --forward-agent[=<ssh-config-host>] to also forward your ssh-agent (with
 # that Host entry's identity loaded), for when the repo being cloned onto
-# the remote itself needs an SSH-authenticated submodule/hook, etc.
+# the remote itself needs an SSH-authenticated submodule/hook, etc. Omit
+# the value to auto-pick the one ~/.ssh/config Host whose HostName is
+# github.com (errors if there's zero or more than one).
 ssh-gh-remote-clone() {
     _ssh_git_strip_forward_agent_flag "$@"
     set -- "${_SSH_GIT_ARGS[@]}"
@@ -441,7 +493,7 @@ ssh-gh-remote-clone() {
 # submodule hooks/scripts that expect that env var directly).
 # Usage: ssh-gh-remote-submodule-update user@host:/path  (scp-style with colon)
 #        ssh-gh-remote-submodule-update user@host /path   (space-separated)
-# Add --forward-agent <ssh-config-host> to also forward your ssh-agent (with
+# Add --forward-agent[=<ssh-config-host>] to also forward your ssh-agent (with
 # that Host entry's identity loaded) — needed when one or more submodules
 # are themselves declared with an SSH URL rather than HTTPS.
 ssh-gh-remote-submodule-update() {
@@ -453,11 +505,12 @@ ssh-gh-remote-submodule-update() {
     local repo_path=$2
 
     if [ -z "$ssh_host" ]; then
-        echo "Usage: ssh-gh-remote-submodule-update <user@host>:[/path] or <user@host> [/path] [--forward-agent <ssh-config-host>]" >&2
+        echo "Usage: ssh-gh-remote-submodule-update <user@host>:[/path] or <user@host> [/path] [--forward-agent[=<ssh-config-host>]]" >&2
         echo "Examples:" >&2
         echo "  ssh-gh-remote-submodule-update dev@server.com:/home/user/myproject" >&2
         echo "  ssh-gh-remote-submodule-update dev@server.com /home/user/myproject" >&2
-        echo "  ssh-gh-remote-submodule-update dev@server.com /home/user/myproject --forward-agent github-work" >&2
+        echo "  ssh-gh-remote-submodule-update dev@server.com /home/user/myproject --forward-agent=github-work" >&2
+        echo "  ssh-gh-remote-submodule-update dev@server.com /home/user/myproject --forward-agent  # auto-picks a github.com Host" >&2
         return 1
     fi
 

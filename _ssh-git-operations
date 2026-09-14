@@ -4,12 +4,27 @@
 # Reuses zsh's own _ssh_hosts / _remote_files (the same helpers scp's completion
 # uses internally) instead of dispatching through _ssh, since _ssh only handles
 # $service values it recognizes (ssh, scp, ...) and ours isn't one of them.
+
+# Host aliases from ~/.ssh/config, for completing --forward-agent=<host>.
+# Parsed directly rather than via _ssh_hosts: _ssh_hosts tries a
+# my-accounts/users-hosts _combination lookup first and returns as soon as
+# that finds *anything* (e.g. plain /etc/hosts entries), which can shadow
+# the caller's actual ~/.ssh/config Host aliases entirely.
+_ssh_git_operations_config_hosts() {
+    local -a hosts
+    [[ -f "$HOME/.ssh/config" ]] && hosts=(${(f)"$(awk 'tolower($1)=="host"{for(i=2;i<=NF;i++) if ($i !~ /[*?]/) print $i}' "$HOME/.ssh/config" 2>/dev/null)"})
+    _describe 'ssh config host (--forward-agent)' hosts
+}
+
 _ssh-git-operations() {
     local ret=1
 
     case "$words[1]" in
         ssh-gh-remote-push|ssh-gh-remote-pull|ssh-gh-remote-fetch|ssh-gh-remote-clone|ssh-gh-remote-submodule-update|ssh-gh-remote-commit)
-            if [ $CURRENT -eq 2 ]; then
+            if [[ "$words[CURRENT]" == --forward-agent=* ]]; then
+                compset -P '*='
+                _ssh_git_operations_config_hosts && ret=0
+            elif [ $CURRENT -eq 2 ]; then
                 if compset -P 1 '[^./][^/]#:'; then
                     _remote_files -- ssh && ret=0
                 elif compset -P 1 '*@'; then
@@ -18,8 +33,9 @@ _ssh-git-operations() {
                     _wanted hosts expl 'remote host name' _ssh_hosts -r: -S: && ret=0
                 fi
             elif [ $CURRENT -eq 3 ]; then
-                _files
-                ret=0
+                _alternative 'files:destination:_files' 'options:option:(--forward-agent=)' && ret=0
+            else
+                _alternative 'files:pathspec:_files' 'options:option:(--forward-agent=)' && ret=0
             fi
             ;;
         scp-git-aware)

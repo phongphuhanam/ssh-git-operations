@@ -52,19 +52,32 @@ end. Full rationale in this repo's `README.md` ("How It Works").
 `user@host:/path`.
 
 `ssh-gh-remote-push`/`-pull`/`-fetch`/`-clone`/`-submodule-update` all also
-accept `--forward-agent <ssh-config-host>` (anywhere in the args), for when
+accept `--forward-agent[=<ssh-config-host>]` (anywhere in the args), for when
 the *remote* repo's (or a submodule's) own `origin` is an SSH URL
 (`git@github.com:...`) rather than HTTPS — the token/credential-helper trick
-only authenticates HTTPS remotes. `<ssh-config-host>` names a `Host` entry
-in the caller's `~/.ssh/config`; its `IdentityFile` gets loaded into the
-local ssh-agent and forwarded (`ssh -A`) for that one call only. It's off by
-default — **don't add it speculatively**; only reach for it when a push/pull/
-fetch/clone/submodule-update fails because the remote's origin turns out to
-be an SSH URL, or the user says so upfront. Forwarding exposes a live agent
-socket to the remote host for the connection's duration (root, or the same
-remote account, could use it to sign requests as the caller) — a materially
-different, larger exposure than the token handling, so don't suggest it
-against a host the user hasn't indicated they trust.
+only authenticates HTTPS remotes. `<ssh-config-host>` names a `Host` entry in
+the caller's `~/.ssh/config`; its `IdentityFile` gets loaded into the local
+ssh-agent (starting one first if none is running) and forwarded (`ssh -A`)
+for that one call only. Only `--forward-agent=<host>` (the `=` form) takes an
+explicit value — there's no space-separated two-token form, since the
+positional args around it are themselves optional and a bare word after the
+flag would be ambiguous.
+
+Omitting the value (`--forward-agent` alone, or `--forward-agent=` with
+nothing after the `=`) auto-picks the one `~/.ssh/config` `Host` entry whose
+`HostName` is `github.com`; it errors out asking for an explicit
+`--forward-agent=<host>` if there's zero or more than one such entry (e.g.
+separate personal/work GitHub identities) rather than guessing. Prefer the
+bare form when you don't already know the right alias; only name one
+explicitly if auto-pick errors out or the user names a specific identity.
+
+It's off by default — **don't add it speculatively**; only reach for it when
+a push/pull/fetch/clone/submodule-update fails because the remote's origin
+turns out to be an SSH URL, or the user says so upfront. Forwarding exposes
+a live agent socket to the remote host for the connection's duration (root,
+or the same remote account, could use it to sign requests as the caller) —
+a materially different, larger exposure than the token handling, so don't
+suggest it against a host the user hasn't indicated they trust.
 
 ## 2. Picking the right one
 
@@ -77,7 +90,9 @@ against a host the user hasn't indicated they trust.
 - "what repos are on X" → `scp-git-aware`
 - a push/pull/fetch/clone/submodule-update fails with an SSH auth error (not
   an HTTPS/token one), or the user mentions the repo/submodule is cloned via
-  SSH → retry the same command with `--forward-agent <ssh-config-host>`
+  SSH → retry the same command with `--forward-agent` (bare, to auto-pick),
+  or `--forward-agent=<ssh-config-host>` if auto-pick errors out or the user
+  names a specific identity
 - "toggle password auth on X" (X = a remote host, and the plugin isn't
   loaded there) → pipe the standalone script through ssh in one line,
   rather than trying to ssh in and call the `sshd-toggle-password` function
