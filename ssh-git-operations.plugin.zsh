@@ -31,6 +31,77 @@ _ssh_git_quote() {
     printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
 }
 
+# Resolves the IdentityFile configured for a named `Host` entry in the
+# caller's ~/.ssh/config, and loads it into the local ssh-agent (via
+# ssh-add) if it isn't already there. Used before agent-forwarded
+# connections, so the identity the caller asked for is guaranteed to be
+# present in the agent that gets forwarded. Note this can't *exclude* other
+# keys already loaded in the same agent — plain ssh-agent forwarding always
+# exposes the whole agent, not a filtered subset; this only guarantees the
+# requested one is included.
+_ssh_git_load_forward_identity() {
+    local host_alias=$1
+
+    if ! awk -v alias="$host_alias" '
+        tolower($1) == "host" { for (i = 2; i <= NF; i++) if ($i == alias) found = 1 }
+        END { exit !found }
+    ' "$HOME/.ssh/config" 2>/dev/null; then
+        echo "Error: no 'Host ${host_alias}' entry found in ~/.ssh/config" >&2
+        return 1
+    fi
+
+    local identity_file
+    identity_file=$(ssh -G "$host_alias" 2>/dev/null | awk '/^identityfile /{print $2; exit}')
+    if [ -z "$identity_file" ]; then
+        echo "Error: could not resolve an IdentityFile for Host '${host_alias}' in ~/.ssh/config" >&2
+        return 1
+    fi
+
+    if ! command -v ssh-add &>/dev/null; then
+        echo "Error: ssh-add not found; cannot load an identity for forwarding" >&2
+        return 1
+    fi
+
+    local fingerprint
+    fingerprint=$(ssh-keygen -lf "$identity_file" 2>/dev/null | awk '{print $2}')
+    if [ -n "$fingerprint" ] && ssh-add -l 2>/dev/null | grep -q "$fingerprint"; then
+        return 0
+    fi
+
+    echo "Loading ${identity_file} into ssh-agent for forwarding (Host '${host_alias}')..."
+    ssh-add "$identity_file"
+}
+
+# Strips a --forward-agent <host-alias> / --forward-agent=<host-alias> flag
+# out of "$@" if present, wherever it appears in the argument list. Sets
+# _SSH_GIT_FORWARD_AGENT to the alias (empty if the flag wasn't given) and
+# _SSH_GIT_ARGS to the remaining positional args. Used by each
+# ssh-gh-remote-* wrapper before its normal positional-argument parsing.
+_ssh_git_strip_forward_agent_flag() {
+    _SSH_GIT_FORWARD_AGENT=""
+    _SSH_GIT_ARGS=()
+    local take_next="false"
+    local arg
+    for arg in "$@"; do
+        if [ "$take_next" = "true" ]; then
+            _SSH_GIT_FORWARD_AGENT="$arg"
+            take_next="false"
+            continue
+        fi
+        case "$arg" in
+            --forward-agent=*)
+                _SSH_GIT_FORWARD_AGENT="${arg#*=}"
+                ;;
+            --forward-agent)
+                take_next="true"
+                ;;
+            *)
+                _SSH_GIT_ARGS+=("$arg")
+                ;;
+        esac
+    done
+}
+
 # Run a git operation (push/pull/fetch/clone) on the remote host.
 #
 # Security notes:
@@ -51,6 +122,18 @@ _ssh_git_quote() {
 # /proc/<pid>/environ-equivalent) for the few seconds the command executes.
 # Avoiding that entirely would require passing the token through a file
 # descriptor/FIFO rather than a git -c value; ask if you want that hardening.
+#
+# Agent forwarding (opt-in via the forward_agent param, empty = off): needed
+# only when the *remote* repo's own origin is an SSH URL (git@github.com:...)
+# rather than HTTPS, since the token/credential-helper trick above only
+# authenticates HTTPS remotes. forward_agent, when non-empty, is the name of
+# a `Host` entry in the caller's ~/.ssh/config; its IdentityFile is loaded
+# into the local ssh-agent (see _ssh_git_load_forward_identity) so that key
+# is what's forwarded via `ssh -A`. Forwarding your local ssh-agent is a
+# real exposure of its own — anyone with root (or the same remote user) can
+# use the forwarded socket to sign requests as you for as long as the
+# connection is open — which is why it defaults off and is scoped to one
+# invocation, not left on in the caller's shell.
 _ssh_git_remote_run() {
     local ssh_host=$1
     local repo_path=$2
@@ -59,7 +142,13 @@ _ssh_git_remote_run() {
 
     case "$operation" in
         push|pull)
-            ssh "$ssh_host" bash -s <<REMOTE_EOF
+            local forward_agent=$5
+            local ssh_opts=()
+            if [ -n "$forward_agent" ]; then
+                _ssh_git_load_forward_identity "$forward_agent" || return 1
+                ssh_opts+=(-A)
+            fi
+            ssh "${ssh_opts[@]}" "$ssh_host" bash -s <<REMOTE_EOF
 set -e
 cd "${repo_path}" || { echo "Error: could not access ${repo_path} on ${ssh_host}" >&2; exit 1; }
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "Error: ${repo_path} is not a git repository" >&2; exit 1; }
@@ -68,7 +157,13 @@ git -c credential.helper= -c credential.helper='!f() { echo "username=x-access-t
 REMOTE_EOF
             ;;
         fetch)
-            ssh "$ssh_host" bash -s <<REMOTE_EOF
+            local forward_agent=$5
+            local ssh_opts=()
+            if [ -n "$forward_agent" ]; then
+                _ssh_git_load_forward_identity "$forward_agent" || return 1
+                ssh_opts+=(-A)
+            fi
+            ssh "${ssh_opts[@]}" "$ssh_host" bash -s <<REMOTE_EOF
 set -e
 cd "${repo_path}" || { echo "Error: could not access ${repo_path} on ${ssh_host}" >&2; exit 1; }
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "Error: ${repo_path} is not a git repository" >&2; exit 1; }
@@ -79,7 +174,13 @@ REMOTE_EOF
             # GH_TOKEN is exported for submodule hooks/scripts that read it
             # directly, alongside the credential helper git itself uses to
             # authenticate each submodule fetch.
-            ssh "$ssh_host" bash -s <<REMOTE_EOF
+            local forward_agent=$5
+            local ssh_opts=()
+            if [ -n "$forward_agent" ]; then
+                _ssh_git_load_forward_identity "$forward_agent" || return 1
+                ssh_opts+=(-A)
+            fi
+            ssh "${ssh_opts[@]}" "$ssh_host" bash -s <<REMOTE_EOF
 set -e
 cd "${repo_path}" || { echo "Error: could not access ${repo_path} on ${ssh_host}" >&2; exit 1; }
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "Error: ${repo_path} is not a git repository" >&2; exit 1; }
@@ -96,7 +197,13 @@ REMOTE_EOF
             # An existing empty directory is used as the clone target.
             # An existing non-empty, non-repo directory is an error.
             local dest_dir=$5
-            ssh "$ssh_host" bash -s <<REMOTE_EOF
+            local forward_agent=$6
+            local ssh_opts=()
+            if [ -n "$forward_agent" ]; then
+                _ssh_git_load_forward_identity "$forward_agent" || return 1
+                ssh_opts+=(-A)
+            fi
+            ssh "${ssh_opts[@]}" "$ssh_host" bash -s <<REMOTE_EOF
 set -e
 url="${repo_path}"
 dest="${dest_dir}"
@@ -115,7 +222,7 @@ fi
 REMOTE_EOF
             ;;
         *)
-            echo "Usage: _ssh_git_remote_run <user@host> <repo_path> <push|pull|fetch|clone|submodule-update> <token>" >&2
+            echo "Usage: _ssh_git_remote_run <user@host> <repo_path> <push|pull|fetch|clone|submodule-update> <token> [forward_agent]" >&2
             return 1
             ;;
     esac
@@ -124,15 +231,23 @@ REMOTE_EOF
 # ssh-gh-remote-push - Push current branch to GitHub over SSH
 # Usage: ssh-gh-remote-push user@host:/path  (scp-style with colon)
 #        ssh-gh-remote-push user@host /path   (space-separated)
+# Add --forward-agent <ssh-config-host> to also forward your ssh-agent (with
+# that Host entry's identity loaded), for when the *remote* repo's own
+# origin is itself an SSH URL rather than HTTPS.
 ssh-gh-remote-push() {
+    _ssh_git_strip_forward_agent_flag "$@"
+    set -- "${_SSH_GIT_ARGS[@]}"
+    local forward_agent=$_SSH_GIT_FORWARD_AGENT
+
     local ssh_host=$1
     local repo_path=$2
 
     if [ -z "$ssh_host" ]; then
-        echo "Usage: ssh-gh-remote-push <user@host>:[/path] or <user@host> [/path]" >&2
+        echo "Usage: ssh-gh-remote-push <user@host>:[/path] or <user@host> [/path] [--forward-agent <ssh-config-host>]" >&2
         echo "Examples:" >&2
         echo "  ssh-gh-remote-push dev@server.com:/home/user/myproject" >&2
         echo "  ssh-gh-remote-push dev@server.com /home/user/myproject" >&2
+        echo "  ssh-gh-remote-push dev@server.com /home/user/myproject --forward-agent github-work" >&2
         return 1
     fi
 
@@ -149,21 +264,29 @@ ssh-gh-remote-push() {
     token=$(_ssh_git_get_token) || return 1
 
     echo "Pushing to GitHub via SSH..."
-    _ssh_git_remote_run "$ssh_host" "$repo_path" push "$token"
+    _ssh_git_remote_run "$ssh_host" "$repo_path" push "$token" "$forward_agent"
 }
 
 # ssh-gh-remote-pull - Pull from GitHub over SSH
 # Usage: ssh-gh-remote-pull user@host:/path  (scp-style with colon)
 #        ssh-gh-remote-pull user@host /path   (space-separated)
+# Add --forward-agent <ssh-config-host> to also forward your ssh-agent (with
+# that Host entry's identity loaded), for when the *remote* repo's own
+# origin is itself an SSH URL rather than HTTPS.
 ssh-gh-remote-pull() {
+    _ssh_git_strip_forward_agent_flag "$@"
+    set -- "${_SSH_GIT_ARGS[@]}"
+    local forward_agent=$_SSH_GIT_FORWARD_AGENT
+
     local ssh_host=$1
     local repo_path=$2
 
     if [ -z "$ssh_host" ]; then
-        echo "Usage: ssh-gh-remote-pull <user@host>:[/path] or <user@host> [/path]" >&2
+        echo "Usage: ssh-gh-remote-pull <user@host>:[/path] or <user@host> [/path] [--forward-agent <ssh-config-host>]" >&2
         echo "Examples:" >&2
         echo "  ssh-gh-remote-pull dev@server.com:/home/user/myproject" >&2
         echo "  ssh-gh-remote-pull dev@server.com /home/user/myproject" >&2
+        echo "  ssh-gh-remote-pull dev@server.com /home/user/myproject --forward-agent github-work" >&2
         return 1
     fi
 
@@ -180,21 +303,29 @@ ssh-gh-remote-pull() {
     token=$(_ssh_git_get_token) || return 1
 
     echo "Pulling from GitHub via SSH..."
-    _ssh_git_remote_run "$ssh_host" "$repo_path" pull "$token"
+    _ssh_git_remote_run "$ssh_host" "$repo_path" pull "$token" "$forward_agent"
 }
 
 # ssh-gh-remote-fetch - Fetch from GitHub over SSH
 # Usage: ssh-gh-remote-fetch user@host:/path  (scp-style with colon)
 #        ssh-gh-remote-fetch user@host /path   (space-separated)
+# Add --forward-agent <ssh-config-host> to also forward your ssh-agent (with
+# that Host entry's identity loaded), for when the *remote* repo's own
+# origin is itself an SSH URL rather than HTTPS.
 ssh-gh-remote-fetch() {
+    _ssh_git_strip_forward_agent_flag "$@"
+    set -- "${_SSH_GIT_ARGS[@]}"
+    local forward_agent=$_SSH_GIT_FORWARD_AGENT
+
     local ssh_host=$1
     local repo_path=$2
 
     if [ -z "$ssh_host" ]; then
-        echo "Usage: ssh-gh-remote-fetch <user@host>:[/path] or <user@host> [/path]" >&2
+        echo "Usage: ssh-gh-remote-fetch <user@host>:[/path] or <user@host> [/path] [--forward-agent <ssh-config-host>]" >&2
         echo "Examples:" >&2
         echo "  ssh-gh-remote-fetch dev@server.com:/home/user/myproject" >&2
         echo "  ssh-gh-remote-fetch dev@server.com /home/user/myproject" >&2
+        echo "  ssh-gh-remote-fetch dev@server.com /home/user/myproject --forward-agent github-work" >&2
         return 1
     fi
 
@@ -211,7 +342,7 @@ ssh-gh-remote-fetch() {
     token=$(_ssh_git_get_token) || return 1
 
     echo "Fetching from GitHub via SSH..."
-    _ssh_git_remote_run "$ssh_host" "$repo_path" fetch "$token"
+    _ssh_git_remote_run "$ssh_host" "$repo_path" fetch "$token" "$forward_agent"
 }
 
 # ssh-gh-remote-clone - Clone a repository from GitHub onto a remote machine over SSH
@@ -224,7 +355,14 @@ ssh-gh-remote-fetch() {
 #   ssh-gh-remote-clone user@host https://github.com/owner/repo.git [dest]
 #   ssh-gh-remote-clone user@host:/path/<dest> owner/repo|url   (scp-style dest)
 #   ssh-gh-remote-clone user@host:owner/repo                    (scp-style repo)
+# Add --forward-agent <ssh-config-host> to also forward your ssh-agent (with
+# that Host entry's identity loaded), for when the repo being cloned onto
+# the remote itself needs an SSH-authenticated submodule/hook, etc.
 ssh-gh-remote-clone() {
+    _ssh_git_strip_forward_agent_flag "$@"
+    set -- "${_SSH_GIT_ARGS[@]}"
+    local forward_agent=$_SSH_GIT_FORWARD_AGENT
+
     local ssh_host=$1
     local repo=$2
     local dest_dir=$3
@@ -276,7 +414,7 @@ ssh-gh-remote-clone() {
     token=$(_ssh_git_get_token) || return 1
 
     echo "Cloning ${clone_url} on ${ssh_host} to ${dest_dir} via SSH..."
-    _ssh_git_remote_run "$ssh_host" "$clone_url" clone "$token" "$dest_dir"
+    _ssh_git_remote_run "$ssh_host" "$clone_url" clone "$token" "$dest_dir" "$forward_agent"
 }
 
 # ssh-gh-remote-submodule-update - Sync and update submodules on a remote repo
@@ -286,15 +424,23 @@ ssh-gh-remote-clone() {
 # submodule hooks/scripts that expect that env var directly).
 # Usage: ssh-gh-remote-submodule-update user@host:/path  (scp-style with colon)
 #        ssh-gh-remote-submodule-update user@host /path   (space-separated)
+# Add --forward-agent <ssh-config-host> to also forward your ssh-agent (with
+# that Host entry's identity loaded) — needed when one or more submodules
+# are themselves declared with an SSH URL rather than HTTPS.
 ssh-gh-remote-submodule-update() {
+    _ssh_git_strip_forward_agent_flag "$@"
+    set -- "${_SSH_GIT_ARGS[@]}"
+    local forward_agent=$_SSH_GIT_FORWARD_AGENT
+
     local ssh_host=$1
     local repo_path=$2
 
     if [ -z "$ssh_host" ]; then
-        echo "Usage: ssh-gh-remote-submodule-update <user@host>:[/path] or <user@host> [/path]" >&2
+        echo "Usage: ssh-gh-remote-submodule-update <user@host>:[/path] or <user@host> [/path] [--forward-agent <ssh-config-host>]" >&2
         echo "Examples:" >&2
         echo "  ssh-gh-remote-submodule-update dev@server.com:/home/user/myproject" >&2
         echo "  ssh-gh-remote-submodule-update dev@server.com /home/user/myproject" >&2
+        echo "  ssh-gh-remote-submodule-update dev@server.com /home/user/myproject --forward-agent github-work" >&2
         return 1
     fi
 
@@ -311,7 +457,7 @@ ssh-gh-remote-submodule-update() {
     token=$(_ssh_git_get_token) || return 1
 
     echo "Syncing and updating submodules via SSH..."
-    _ssh_git_remote_run "$ssh_host" "$repo_path" submodule-update "$token"
+    _ssh_git_remote_run "$ssh_host" "$repo_path" submodule-update "$token" "$forward_agent"
 }
 
 # ssh-gh-remote-commit - Stage and commit changes on a remote repo using

@@ -51,6 +51,21 @@ end. Full rationale in this repo's `README.md` ("How It Works").
 `<host>` accepts either `user@host /path` (space-separated) or scp-style
 `user@host:/path`.
 
+`ssh-gh-remote-push`/`-pull`/`-fetch`/`-clone`/`-submodule-update` all also
+accept `--forward-agent <ssh-config-host>` (anywhere in the args), for when
+the *remote* repo's (or a submodule's) own `origin` is an SSH URL
+(`git@github.com:...`) rather than HTTPS — the token/credential-helper trick
+only authenticates HTTPS remotes. `<ssh-config-host>` names a `Host` entry
+in the caller's `~/.ssh/config`; its `IdentityFile` gets loaded into the
+local ssh-agent and forwarded (`ssh -A`) for that one call only. It's off by
+default — **don't add it speculatively**; only reach for it when a push/pull/
+fetch/clone/submodule-update fails because the remote's origin turns out to
+be an SSH URL, or the user says so upfront. Forwarding exposes a live agent
+socket to the remote host for the connection's duration (root, or the same
+remote account, could use it to sign requests as the caller) — a materially
+different, larger exposure than the token handling, so don't suggest it
+against a host the user hasn't indicated they trust.
+
 ## 2. Picking the right one
 
 - "push/sync my changes to X" → `ssh-gh-remote-push` (or `-fetch` if they just
@@ -60,6 +75,9 @@ end. Full rationale in this repo's `README.md` ("How It Works").
   `ssh-gh-remote-commit`
 - "update submodules on X" → `ssh-gh-remote-submodule-update`
 - "what repos are on X" → `scp-git-aware`
+- a push/pull/fetch/clone/submodule-update fails with an SSH auth error (not
+  an HTTPS/token one), or the user mentions the repo/submodule is cloned via
+  SSH → retry the same command with `--forward-agent <ssh-config-host>`
 - "toggle password auth on X" (X = a remote host, and the plugin isn't
   loaded there) → pipe the standalone script through ssh in one line,
   rather than trying to ssh in and call the `sshd-toggle-password` function

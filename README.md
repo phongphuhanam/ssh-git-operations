@@ -7,6 +7,7 @@ A secure Oh My Zsh plugin for authenticated git push/pull/fetch/clone operations
 - **Secure token handling**: GitHub token is obtained locally and passed via git credential helper without storing it remotely
 - **Six git operations**: `ssh-gh-remote-push`, `ssh-gh-remote-pull`, `ssh-gh-remote-fetch`, `ssh-gh-remote-clone`, `ssh-gh-remote-submodule-update`, `ssh-gh-remote-commit`
 - **Commit as yourself**: `ssh-gh-remote-commit` commits on the remote using *your local* git identity, without touching the remote's git config
+- **Optional agent forwarding**: `--forward-agent <ssh-config-host>` on any command, for repos (or submodules) whose `origin` is an SSH URL rather than HTTPS — off by default, scoped to one invocation
 - **Current branch detection**: Automatically detects and operates on the current branch
 - **Git-aware scp**: Helper command to discover git repositories on remote machines
 - **No token persistence**: Token exists only in memory during the git operation
@@ -172,6 +173,18 @@ ssh-gh-remote-commit dev@myserver.com:/home/user/my-project -m "Fix bug in parse
 # Commit everything changed in the repo
 ssh-gh-remote-commit dev@myserver.com /home/user/my-project -m "WIP checkpoint"
 ```
+
+### Forwarding Your SSH Agent (for repos cloned via SSH)
+
+Everything above authenticates over HTTPS using your GitHub token, which only works if the repository's (or a submodule's) `origin` is an HTTPS URL. If it's an SSH URL instead (`git@github.com:owner/repo.git`), add `--forward-agent <ssh-config-host>` to `ssh-gh-remote-push`, `-pull`, `-fetch`, `-clone`, or `-submodule-update`, where `<ssh-config-host>` is the name of a `Host` entry in your local `~/.ssh/config`:
+
+```bash
+ssh-gh-remote-fetch dev@myserver.com /home/user/my-project --forward-agent github-work
+```
+
+This resolves that `Host` entry's `IdentityFile`, loads it into your local ssh-agent if it isn't already there, and forwards the agent (`ssh -A`) for that one connection only — it's off by default and never left on in your shell.
+
+**This is a different kind of exposure than the token handling above**: a forwarded agent is a live socket on the remote host for as long as the connection is open, and anyone with root (or the same account) there could use it to sign requests as you during that window — unlike the token, which never leaves the encrypted stdin stream. Only use `--forward-agent` against hosts you trust, and only when the repo actually needs it.
 
 ### Discover Git Repositories on Remote Machine
 
